@@ -24,9 +24,9 @@
 
 ## Etapa 0 — Arrumar a casa
 
-- [ ] Commitar as mudanças da última rodada (hoje só existe o commit inicial; o resto está no working tree).
-- [ ] CI rodando `tsc -b`, `oxlint`, `vitest run` e `vite build` a cada push.
-- [ ] Tirar da raiz os scripts de setup de orquestração (`setup-*.sh`, `desativar-orquestracao.sh`) ou movê-los para `scripts/`.
+- [x] Commitar as mudanças da última rodada (branch `roadmap`; `main` continua no commit inicial).
+- [x] CI rodando `tsc -b`, `oxlint`, `vitest run` e `vite build` a cada push (`.github/workflows/ci.yml`; começa a valer quando o repositório tiver um remoto no GitHub).
+- [x] Scripts de setup de orquestração movidos para `scripts/`.
 - [ ] Escolher a licença do projeto e conferir a licença de redistribuição dos samples (§11.4).
 - [ ] Definir onde o app será publicado e documentar o deploy no `README.md`.
 
