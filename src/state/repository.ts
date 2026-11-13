@@ -9,6 +9,8 @@ import { SCALES } from "../core/scales";
 import { sanitizeContent } from "../export/json";
 
 export type RestrictionMode = "strict" | "colorful" | "free";
+/** Tema da interface: "auto" segue o sistema. */
+export type Theme = "auto" | "light" | "dark";
 
 export type Session = {
   version: 1;
@@ -27,6 +29,7 @@ export type Session = {
   showDegrees?: boolean;
   /** Tocar o acorde ao pousar o mouse numa fatia da roda. */
   soundOnHover?: boolean;
+  theme?: Theme;
   midi?: MidiSettings;
   song: Song;
   /** Música salva associada à sessão (null = ainda não salva). */
@@ -96,6 +99,7 @@ function writeSongs(songs: Record<string, SavedSong>): boolean {
 }
 
 const SCALE_IDS = new Set(SCALES.map((s) => s.id));
+const THEMES: Theme[] = ["auto", "light", "dark"];
 const MODES: RestrictionMode[] = ["strict", "colorful", "free"];
 const ACCIDENTALS: AccidentalPref[] = ["auto", "sharp", "flat"];
 const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
@@ -124,6 +128,7 @@ export class LocalSongRepository implements SongRepository {
         grid: GRIDS.find((g) => g === p.grid) ?? 1,
         showDegrees: bool(p.showDegrees, true),
         soundOnHover: bool(p.soundOnHover, false),
+        theme: THEMES.find((t) => t === p.theme) ?? "auto",
         midi: typeof p.midi === "object" && p.midi !== null ? (p.midi as MidiSettings) : undefined,
         songId: typeof p.songId === "string" ? p.songId : null,
         songName: typeof p.songName === "string" ? p.songName : undefined,

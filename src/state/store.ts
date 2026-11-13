@@ -13,7 +13,7 @@ import type { Grid, Meter } from "../core/timeline";
 import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
 import { sanitizeContent, type SongContent } from "../export/json";
-import { repository, type RestrictionMode, type SavedSongMeta, type Session } from "./repository";
+import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
 
@@ -51,7 +51,8 @@ export function normalizeHash(hash: string | null): string | null {
 /** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
 type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
-type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover"> & {
+type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "theme"> & {
+  theme: Theme;
   midi: MidiSettings;
   countIn: boolean;
   grid: Grid;
@@ -90,6 +91,7 @@ type Actions = {
   setGrid: (g: Grid) => void;
   setShowDegrees: (v: boolean) => void;
   setSoundOnHover: (v: boolean) => void;
+  setTheme: (t: Theme) => void;
   /** Estende a seleção até este acorde do bloco atual (null desfaz a região). */
   setRegionEnd: (id: string | null) => void;
   setLoop: (v: boolean) => void;
@@ -162,9 +164,10 @@ function initialState(): State {
     countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, ...rest } = base;
+  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, theme = "auto", ...rest } = base;
   return {
     ...rest,
+    theme,
     countIn,
     grid,
     showDegrees,
@@ -307,6 +310,7 @@ export const useStore = create<Store>()((set, get) => {
     setGrid: (grid) => set({ grid }),
     setShowDegrees: (showDegrees) => set({ showDegrees }),
     setSoundOnHover: (soundOnHover) => set({ soundOnHover }),
+    setTheme: (theme) => set({ theme }),
     setRegionEnd: (regionEnd) => set({ regionEnd }),
     setLoop: (loop) => set({ loop }),
     setPlayScope: (playScope) => set({ playScope }),
@@ -658,6 +662,7 @@ function buildSession(s: State): Session {
     grid: s.grid,
     showDegrees: s.showDegrees,
     soundOnHover: s.soundOnHover,
+    theme: s.theme,
     midi: s.midi,
     song: s.song,
     songId: s.songId,
