@@ -14,4 +14,5 @@ npm run build
 - `src/core/` — teoria musical pura e testada (escalas, acordes, diatônicos, modificadores, tempo, arranjo).
 - `src/audio/` — motor Tone.js, catálogo de instrumentos e sugestões por escala. Samples via smplr: SplendidGrandPiano, E-Pianos, VCSL, Smolken e MusyngKite (FluidR3 como plano B), carregados sob demanda.
 - `src/state/` — store Zustand com desfazer/refazer e persistência.
+- `src/export/` — cifra em texto, MIDI (`.mid`), arquivo JSON reimportável (com validação de conteúdo externo) e link de compartilhamento (`#s=…`, música comprimida no fragmento da URL).
 - `src/ui/` — componentes (roda, progressão, arranjo, modificadores, seletores).

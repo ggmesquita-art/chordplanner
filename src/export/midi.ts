@@ -30,8 +30,9 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
     tick += Math.round(ev.beats * PPQ * (4 / ev.meter[1]));
   }
   const tickAtSec = (sec: number) => {
-    const i = expanded.events.findIndex((e) => Math.abs(e.startSec - sec) < 1e-6);
-    return i >= 0 ? eventTicks[i] : 0;
+    // Primeiro acorde que começa em `sec` ou depois; sem ele (bloco vazio no fim), o fim da música.
+    const i = expanded.events.findIndex((e) => e.startSec >= sec - 1e-6);
+    return i >= 0 ? eventTicks[i] : tick;
   };
 
   midi.header.tempos = expanded.tempoMap.map((t) => ({ ticks: tickAtSec(t.startSec), bpm: t.bpm * (4 / t.meter[1]) }));

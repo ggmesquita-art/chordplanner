@@ -4,6 +4,7 @@ import type { PlaybackPattern } from "../../core/song";
 import { METERS, meterLabel, type Meter } from "../../core/timeline";
 import { useStore } from "../../state/store";
 import { togglePlay } from "../hooks";
+import { NumberField } from "../NumberField";
 import { PATTERNS } from "../patterns";
 import { MidiPanel } from "./MidiPanel";
 
@@ -14,8 +15,9 @@ export function Transport() {
   const loop = useStore((s) => s.loop);
   const scope = useStore((s) => s.playScope);
   const metronome = useStore((s) => s.metronome);
+  const countIn = useStore((s) => s.countIn);
   const follow = useStore((s) => s.followPlayback);
-  const { setBpm, setMeter, setSwing, setLoop, setPlayScope, setMetronome, setPattern, setFollowPlayback } = useStore.getState();
+  const { setBpm, setMeter, setSwing, setLoop, setPlayScope, setMetronome, setCountIn, setPattern, setFollowPlayback } = useStore.getState();
   const taps = useRef<number[]>([]);
 
   const tap = () => {
@@ -52,7 +54,7 @@ export function Transport() {
       </div>
       <label className="field">
         ♩=
-        <input type="number" min={30} max={300} value={song.bpm} onChange={(e) => setBpm(Number(e.target.value) || 90)} aria-label="BPM" />
+        <NumberField value={song.bpm} min={30} max={300} onCommit={(v) => v !== undefined && setBpm(v)} aria-label="BPM" />
       </label>
       <button className="toggle" onClick={tap} title="Toque no ritmo para definir o BPM">
         Tap
@@ -80,6 +82,9 @@ export function Transport() {
       </label>
       <button className={`toggle ${metronome ? "on" : ""}`} onClick={() => setMetronome(!metronome)} aria-pressed={metronome} title="Metrônomo">
         🔔 Metrônomo
+      </button>
+      <button className={`toggle ${countIn ? "on" : ""}`} onClick={() => setCountIn(!countIn)} aria-pressed={countIn} title="Um compasso de contagem antes de tocar">
+        ⏺ Contagem
       </button>
       <MidiPanel />
       <button className={`toggle ${follow ? "on" : ""}`} onClick={() => setFollowPlayback(!follow)} aria-pressed={follow} title="A progressão acompanha o bloco que está tocando">

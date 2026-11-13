@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTRUMENTS, hasInstrument } from "../audio/instruments";
 import { FAMILY_SUGGESTIONS, SCALE_SUGGESTIONS, suggestionsFor } from "../audio/scaleInstruments";
 import { SCALES } from "../core/scales";
 import { makeSong } from "../core/song";
-import { selectBlock, selectDirty, useStore } from "./store";
+import { sanitizeContent } from "../export/json";
+import { repository } from "./repository";
+import { contentHash, normalizeHash, selectBlock, selectDirty, useStore } from "./store";
 
 describe("instrumentos (§5.2–5.3)", () => {
   it("ids únicos e tessituras válidas", () => {
@@ -136,5 +138,103 @@ describe("store", () => {
     expect(useStore.getState().songId).not.toBe(id);
     useStore.getState().deleteSong(id);
     expect(useStore.getState().savedSongs.map((m) => m.name)).toEqual(["Cópia"]);
+  });
+
+  it("desfazer/refazer restaura tônica e fundamentais", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().addChord(7, "maj");
+    useStore.getState().setTonic(2);
+    useStore.getState().undo();
+    expect(useStore.getState().tonic).toBe(0);
+    expect(chords().map((c) => c.root)).toEqual([0, 7]);
+    useStore.getState().redo();
+    expect(useStore.getState().tonic).toBe(2);
+    expect(chords().map((c) => c.root)).toEqual([2, 9]);
+  });
+
+  it("aplicar template sem tônica e desfazer volta a tonic null", () => {
+    useStore.getState().applyTemplate("pop");
+    expect(useStore.getState().tonic).toBe(0);
+    useStore.getState().undo();
+    expect(useStore.getState().tonic).toBeNull();
+  });
+
+  it("primeira tônica entra no histórico em um único passo", () => {
+    useStore.getState().setTonic(5);
+    expect(useStore.getState().past.length).toBe(1);
+    useStore.getState().undo();
+    expect(useStore.getState().tonic).toBeNull();
+    expect(chords()).toEqual([]);
+  });
+
+  it("trocar escala e desfazer restaura scaleId; sem mudança não cria histórico", () => {
+    useStore.getState().setScale("minor");
+    expect(useStore.getState().past.length).toBe(1);
+    useStore.getState().setScale("minor");
+    expect(useStore.getState().past.length).toBe(1);
+    useStore.getState().undo();
+    expect(useStore.getState().scaleId).toBe("major");
+  });
+
+  it("setBlockProps limita bpm e canal MIDI", () => {
+    const id = selectBlock(useStore.getState())!.id;
+    const props = () => selectBlock(useStore.getState())!;
+    useStore.getState().setBlockProps(id, { bpm: 0, midiChannel: 99 });
+    expect([props().bpm, props().midiChannel]).toEqual([30, 16]);
+    useStore.getState().setBlockProps(id, { bpm: 999, midiChannel: 0 });
+    expect([props().bpm, props().midiChannel]).toEqual([300, 1]);
+    useStore.getState().setBlockProps(id, { bpm: undefined, midiChannel: NaN });
+    expect(props().bpm).toBeUndefined();
+    expect(props().midiChannel).toBeUndefined();
+  });
+
+  it("saveSong devolve false e não mexe no estado quando o repositório falha", () => {
+    useStore.getState().newSong();
+    useStore.getState().setTonic(2);
+    const before = useStore.getState().savedHash;
+    const spy = vi.spyOn(repository, "saveSong").mockReturnValue(false);
+    expect(useStore.getState().saveSong()).toBe(false);
+    expect(useStore.getState().savedHash).toBe(before);
+    expect(useStore.getState().songId).toBeNull();
+    expect(selectDirty(useStore.getState())).toBe(true);
+    expect(useStore.getState().saveCopy("X")).toBe(false);
+    expect(useStore.getState().songId).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("loadExternal carrega como música nova e suja", () => {
+    const { song } = useStore.getState();
+    useStore.getState().loadExternal({ name: "Externa", scaleId: "minor", tonic: 4, song });
+    const st = useStore.getState();
+    expect(st.songId).toBeNull();
+    expect(st.songName).toBe("Externa");
+    expect(st.song).not.toBe(song);
+    expect(st.past).toEqual([]);
+    expect(selectDirty(st)).toBe(true);
+  });
+
+  it("o hash do conteúdo não depende da ordem dos campos (recarregar não acusa alteração falsa)", () => {
+    const st0 = useStore.getState();
+    st0.newSong();
+    st0.setTonic(0);
+    st0.addChord(7, "maj");
+    st0.addBlock();
+    st0.moveItem(1, 0);
+    const id = selectBlock(useStore.getState())!.id;
+    // Overrides criados fora da ordem "canônica" dos campos.
+    useStore.getState().setBlockProps(id, { instrument: "synth-pad" });
+    useStore.getState().setBlockProps(id, { midiChannel: 3 });
+    useStore.getState().setBlockProps(id, { bpm: 120 });
+    const s = useStore.getState();
+    const content = { scaleId: s.scaleId, tonic: s.tonic, song: s.song };
+    const legacy = JSON.stringify([s.scaleId, s.tonic, s.song]);
+    // O que volta do armazenamento passa pelo saneamento, que reconstrói os objetos em outra ordem.
+    const reloaded = sanitizeContent(JSON.parse(JSON.stringify(content)))!;
+    expect(JSON.stringify(reloaded.song)).not.toBe(JSON.stringify(s.song));
+    expect(contentHash(reloaded)).toBe(contentHash(content));
+    // Hash gravado por versões anteriores (ordem de inserção) é convertido para a forma atual.
+    expect(normalizeHash(legacy)).toBe(contentHash(content));
+    expect(normalizeHash(null)).toBeNull();
+    expect(normalizeHash("não é json")).toBe("não é json");
   });
 });

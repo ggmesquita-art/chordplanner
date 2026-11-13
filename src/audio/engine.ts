@@ -7,7 +7,7 @@ import { fitToRange } from "../core/voicing";
 import { CacheStorage, ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
 import { getInstrumentDef, type InstrumentDef, type SmplrSource, type SynthPreset } from "./instruments";
 import { midiActive, midiChannel, midiMutesBrowser, noteOff, noteOn, panic, toMidiTime } from "./midi";
-import { renderNotes, strike, strumFor } from "./render";
+import { countIn, renderNotes, strike, strumFor } from "./render";
 
 type Voice = {
   triggerAttackRelease: (notes: string[], duration: number, time?: number, velocity?: number) => unknown;
@@ -384,6 +384,8 @@ const metronomeVoice = () =>
 export type PlayOptions = {
   loop: boolean;
   metronome: boolean;
+  /** Um compasso de cliques antes de começar (toca uma vez, mesmo com loop). */
+  countIn?: boolean;
   swing: number;
   /** Canal MIDI de cada bloco (override do bloco ou global). */
   channelFor: (blockId: string) => number;
@@ -399,11 +401,21 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
   const { events, totalSec } = expanded;
   if (!events.length || totalSec <= 0) return;
 
+  // Contagem: cliques em [0, offset); todo o resto é deslocado por `offset`.
+  let offset = 0;
+  if (opts.countIn) {
+    const ci = countIn(expanded);
+    offset = ci.seconds;
+    for (const c of ci.clicks) {
+      transport.schedule((time) => void metronomeVoice().triggerAttackRelease(c.accent ? 1760 : 1100, 0.03, time), c.time);
+    }
+  }
+
   // Playhead e metrônomo, por acorde.
   let blockKey = "";
   let beatInBlock = 0;
   events.forEach((ev, index) => {
-    transport.schedule((time) => draw.schedule(() => opts.onEvent(index), time), ev.startSec);
+    transport.schedule((time) => draw.schedule(() => opts.onEvent(index), time), offset + ev.startSec);
     const key = `${ev.itemIndex}:${ev.repetition}`;
     if (key !== blockKey) {
       blockKey = key;
@@ -415,7 +427,7 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
       const spb = 60 / ev.bpm;
       for (let b = 0; b < ev.beats; b++) {
         const accent = (firstBeat + b) % ev.meter[0] === 0;
-        transport.schedule((time) => void metronomeVoice().triggerAttackRelease(accent ? 1760 : 1100, 0.03, time), ev.startSec + b * spb);
+        transport.schedule((time) => void metronomeVoice().triggerAttackRelease(accent ? 1760 : 1100, 0.03, time), offset + ev.startSec + b * spb);
       }
     }
   });
@@ -424,8 +436,8 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
   // passa pelo Transport, então parar cancela o que ainda não saiu.
   if (midiActive()) {
     for (const n of renderNotes(expanded, { swing: opts.swing, fitToInstrument: false, humanize: true, channelFor: opts.channelFor })) {
-      transport.schedule((time) => noteOn(n.channel, n.midi, n.velocity, toMidiTime(time, rawCtx())), n.time);
-      transport.schedule((time) => noteOff(n.channel, n.midi, toMidiTime(time, rawCtx())), n.time + n.duration);
+      transport.schedule((time) => noteOn(n.channel, n.midi, n.velocity, toMidiTime(time, rawCtx())), offset + n.time);
+      transport.schedule((time) => noteOff(n.channel, n.midi, toMidiTime(time, rawCtx())), offset + n.time + n.duration);
     }
   }
 
@@ -434,17 +446,17 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
     for (const n of renderNotes(expanded, { swing: opts.swing, fitToInstrument: true, humanize: true })) {
       const entry = ensureInstrument(n.instrument);
       const note = toNote(n.midi);
-      transport.schedule((time) => void entry.voice.triggerAttackRelease([note], n.duration, time, n.velocity), n.time);
+      transport.schedule((time) => void entry.voice.triggerAttackRelease([note], n.duration, time, n.velocity), offset + n.time);
     }
   }
 
   if (opts.loop) {
     transport.loop = true;
-    transport.loopStart = 0;
-    transport.loopEnd = totalSec;
+    transport.loopStart = offset;
+    transport.loopEnd = offset + totalSec;
   } else {
     transport.loop = false;
-    transport.schedule((time) => draw.schedule(() => opts.onEnd(), time), totalSec);
+    transport.schedule((time) => draw.schedule(() => opts.onEnd(), time), offset + totalSec);
   }
   transport.start("+0.05");
 }

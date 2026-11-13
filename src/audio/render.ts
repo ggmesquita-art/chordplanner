@@ -3,7 +3,7 @@
 // saída MIDI e pelo export .mid — assim o arquivo soa como o que se ouve.
 
 import type { Expanded, PlaybackPattern } from "../core/song";
-import { swingOffset } from "../core/timeline";
+import { secondsPerBeat, swingOffset } from "../core/timeline";
 import { fitToRange, voiceChord } from "../core/voicing";
 import { getInstrumentDef, type InstrumentDef } from "./instruments";
 
@@ -102,6 +102,17 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
   });
 
   return out;
+}
+
+export type CountInClick = { time: number; accent: boolean };
+
+/** Um compasso de contagem no andamento e na fórmula do primeiro acorde. */
+export function countIn(expanded: Expanded): { seconds: number; clicks: CountInClick[] } {
+  const first = expanded.events[0];
+  if (!first) return { seconds: 0, clicks: [] };
+  const spb = secondsPerBeat(first.bpm);
+  const clicks = Array.from({ length: first.meter[0] }, (_, i) => ({ time: i * spb, accent: i === 0 }));
+  return { seconds: first.meter[0] * spb, clicks };
 }
 
 /** Programa General MIDI (0–127) do instrumento, pelo nome do banco GM. */

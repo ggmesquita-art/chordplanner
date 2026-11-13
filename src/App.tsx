@@ -3,8 +3,9 @@ import { useStore } from "./state/store";
 import { Arrangement } from "./ui/Arrangement/Arrangement";
 import { ChordWheel, DegreeStrip } from "./ui/ChordWheel/ChordWheel";
 import { Header } from "./ui/Header";
-import { togglePlay, useMidiSync } from "./ui/hooks";
+import { togglePlay, useMidiSync, useSessionGuard } from "./ui/hooks";
 import { ModifierPanel } from "./ui/ModifierPanel/ModifierPanel";
+import { SharedLink } from "./ui/SharedLink";
 import { Progression } from "./ui/Progression/Progression";
 import { Transport } from "./ui/Transport/Transport";
 
@@ -32,11 +33,13 @@ function useShortcuts() {
 export default function App() {
   useShortcuts();
   useMidiSync();
+  useSessionGuard();
   const soundOnClick = useStore((s) => s.soundOnClick);
   const setSoundOnClick = useStore((s) => s.setSoundOnClick);
 
   return (
     <div className="app">
+      <SharedLink />
       <Header />
       <Transport />
       <main className="main">

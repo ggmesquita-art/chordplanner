@@ -4,7 +4,7 @@ import { makeChord } from "../core/chords";
 import { expandArrangement, makeBlock, makeSong } from "../core/song";
 import { songToMidi } from "../export/midi";
 import { configureMidi, DEFAULT_MIDI, initMidi, midiActive, noteOff, noteOn, panic } from "./midi";
-import { renderNotes } from "./render";
+import { countIn, renderNotes } from "./render";
 
 function song2() {
   const song = makeSong();
@@ -67,6 +67,46 @@ describe("export .mid", () => {
     expect(refraoBass.ticks).toBe(8 * ppq);
     expect(refraoBass.durationTicks).toBeGreaterThan(2.8 * ppq);
     expect(refraoBass.durationTicks).toBeLessThanOrEqual(3 * ppq);
+  });
+
+  it("marcadores: primeiro bloco no tick 0, blocos vazios no tick do próximo acorde ou do fim", () => {
+    const song = song2();
+    const vazio = makeBlock("Vazio", 2);
+    const fim = makeBlock("Fim", 3);
+    song.blocks[vazio.id] = vazio;
+    song.blocks[fim.id] = fim;
+    song.arrangement.splice(1, 0, { id: "v", blockId: vazio.id, repeat: 1 });
+    song.arrangement.push({ id: "f", blockId: fim.id, repeat: 1 });
+    const midi = new Midi(songToMidi(song, { channel: 1, splitBass: true }));
+    const ppq = midi.header.ppq;
+    const tick = (name: string) => midi.header.meta.find((m) => m.text === name)!.ticks;
+    expect(tick("Verso A")).toBe(0);
+    expect(tick("Vazio")).toBe(8 * ppq);
+    expect(tick("Refrão")).toBe(8 * ppq);
+    // Fim da música: 8 semínimas + 6 colcheias (3 semínimas).
+    expect(tick("Fim")).toBe(11 * ppq);
+    // Mudança de tempo/compasso do bloco vazio final não volta ao tick 0.
+    expect(midi.header.tempos.every((t, i) => i === 0 || t.ticks > 0)).toBe(true);
+  });
+});
+
+describe("countIn", () => {
+  it("4/4 a 120 bpm: 4 cliques de meio segundo, só o primeiro acentuado", () => {
+    const song = song2();
+    song.bpm = 120;
+    song.blocks[song.arrangement[0].blockId].bpm = 120;
+    const ci = countIn(expandArrangement(song));
+    expect(ci.seconds).toBe(2);
+    expect(ci.clicks.map((c) => c.time)).toEqual([0, 0.5, 1, 1.5]);
+    expect(ci.clicks.map((c) => c.accent)).toEqual([true, false, false, false]);
+  });
+
+  it("6/8: 6 cliques; sem eventos: vazio", () => {
+    const song = song2();
+    song.arrangement.shift();
+    const ci = countIn(expandArrangement(song));
+    expect(ci.clicks.length).toBe(6);
+    expect(countIn(expandArrangement(makeSong()))).toEqual({ seconds: 0, clicks: [] });
   });
 });
 

@@ -6,7 +6,7 @@ import type { Chord } from "../core/chords";
 import { makeSpeller, type Speller } from "../core/pitch";
 import { expandArrangement } from "../core/song";
 import { voiceChord } from "../core/voicing";
-import { selectBlock, selectCtx, useStore } from "../state/store";
+import { flushSession, selectBlock, selectCtx, sessionAtRisk, useStore } from "../state/store";
 
 export function useCtx() {
   const { tonic, scaleId } = useStore(useShallow((s) => ({ tonic: s.tonic, scaleId: s.scaleId })));
@@ -52,6 +52,7 @@ export async function togglePlay() {
     channelFor: (blockId) => useStore.getState().song.blocks[blockId]?.midiChannel ?? useStore.getState().midi.channel,
     loop: s.loop,
     metronome: s.metronome,
+    countIn: s.countIn,
     swing: s.song.swing,
     onEvent: (i) => {
       const ev = expanded.events[i];
@@ -78,4 +79,27 @@ export function useMidiSync() {
 
 export function useMidiState() {
   return useSyncExternalStore(subscribeMidi, midiSnapshot);
+}
+
+/** Grava a sessão ao fechar/ocultar a página; só pede confirmação se a sessão não estiver sendo persistida. */
+export function useSessionGuard() {
+  useEffect(() => {
+    const onHide = () => flushSession();
+    const onVisibility = () => document.visibilityState === "hidden" && flushSession();
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      flushSession();
+      if (sessionAtRisk()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, []);
 }

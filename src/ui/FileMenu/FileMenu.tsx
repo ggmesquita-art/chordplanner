@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { makeSpeller } from "../../core/pitch";
 import { getScale, pitchSet } from "../../core/scales";
+import { parseSongFile, SongFileError, type SongFile } from "../../export/json";
 import { selectDirty, useStore } from "../../state/store";
 import { stopPlayback } from "../hooks";
+import { SAVE_ERROR } from "../SharedLink";
 import { usePopover } from "../usePopover";
 
 const dateFmt = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -15,28 +17,37 @@ function keyLabel(scaleId: string, tonic: number | null): string {
 }
 
 /** Pede confirmação antes de descartar alterações não salvas. */
-type Pending = { kind: "new" } | { kind: "open"; id: string; name: string } | null;
+type Pending = { kind: "new" } | { kind: "open"; id: string; name: string } | { kind: "import"; file: SongFile } | null;
+
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
 export function FileMenu() {
   const songName = useStore((s) => s.songName);
   const songId = useStore((s) => s.songId);
   const dirty = useStore(selectDirty);
   const savedSongs = useStore((s) => s.savedSongs);
-  const { saveSong, saveCopy, renameSong, newSong, openSong, deleteSong } = useStore.getState();
+  const { saveSong, saveCopy, renameSong, newSong, openSong, deleteSong, loadExternal } = useStore.getState();
   const { open: menuOpen, setOpen: setMenuOpen, ref: menuRef } = usePopover();
   const { open: confirmOpen, setOpen: setConfirmOpen, ref: confirmRef } = usePopover();
   const [pending, setPending] = useState<Pending>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [flash, setFlash] = useState(false);
+  const [flash, setFlash] = useState<"ok" | "error" | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  const save = () => {
-    saveSong();
-    setFlash(true);
+  /** Executa um salvamento e mostra o resultado; devolve se gravou. */
+  const attempt = (fn: () => boolean): boolean => {
+    const ok = fn();
+    setFlash(ok ? "ok" : "error");
+    setSaveFailed(!ok);
+    return ok;
   };
+  const save = () => attempt(() => useStore.getState().saveSong());
 
   useEffect(() => {
     if (!flash) return;
-    const t = setTimeout(() => setFlash(false), 1400);
+    const t = setTimeout(() => setFlash(null), 1400);
     return () => clearTimeout(t);
   }, [flash]);
 
@@ -45,21 +56,36 @@ export function FileMenu() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        useStore.getState().saveSong();
-        setFlash(true);
+        const ok = useStore.getState().saveSong();
+        setFlash(ok ? "ok" : "error");
+        setSaveFailed(!ok);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const onImport = async (file: File | undefined) => {
+    if (!file) return;
+    setImportError(null);
+    try {
+      if (file.size > MAX_IMPORT_BYTES) throw new SongFileError("Arquivo grande demais.");
+      request({ kind: "import", file: parseSongFile(await file.text()) });
+    } catch (e) {
+      setImportError(e instanceof SongFileError ? e.message : "Não foi possível ler o arquivo.");
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
   const run = (p: NonNullable<Pending>) => {
     stopPlayback();
     if (p.kind === "new") newSong();
+    else if (p.kind === "import") loadExternal(p.file);
     else openSong(p.id);
     setPending(null);
     setConfirmOpen(false);
     setMenuOpen(false);
+    setImportError(null);
   };
 
   const request = (p: NonNullable<Pending>) => {
@@ -80,7 +106,7 @@ export function FileMenu() {
           size={Math.max(8, Math.min(26, songName.length + 1))}
         />
         <span className={`dirty ${dirty ? "on" : ""}`} title={dirty ? "Alterações não salvas" : songId ? "Salvo" : "Ainda não salvo"}>
-          {flash ? "✓" : dirty ? "●" : ""}
+          {flash === "ok" ? "✓" : flash === "error" ? "⚠" : dirty ? "●" : ""}
         </span>
       </div>
 
@@ -97,8 +123,7 @@ export function FileMenu() {
               <button
                 className="btn primary"
                 onClick={() => {
-                  saveSong();
-                  run(pending);
+                  if (attempt(saveSong)) run(pending);
                 }}
               >
                 Salvar e continuar
@@ -114,12 +139,24 @@ export function FileMenu() {
         )}
       </div>
 
-      <button className={`btn ${dirty ? "primary" : ""}`} onClick={save} title="Salvar (Ctrl+S)">
-        {flash ? "✓ Salvo" : "💾 Salvar"}
-      </button>
+      <div className="picker">
+        <button className={`btn ${dirty ? "primary" : ""}`} onClick={save} title="Salvar (Ctrl+S)">
+          {flash === "ok" ? "✓ Salvo" : flash === "error" ? "⚠ Não salvou" : "💾 Salvar"}
+        </button>
+        {saveFailed && (
+          <div className="popover confirm-pop" role="alert">
+            <p>{SAVE_ERROR}</p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setSaveFailed(false)} aria-label="Dispensar">
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="picker" ref={menuRef}>
-        <button className="btn" onClick={() => setMenuOpen(!menuOpen)} aria-haspopup="listbox" aria-expanded={menuOpen}>
+        <button className="btn" onClick={() => (setMenuOpen(!menuOpen), setImportError(null))} aria-haspopup="listbox" aria-expanded={menuOpen}>
           Abrir ▾
         </button>
         {menuOpen && (
@@ -153,13 +190,22 @@ export function FileMenu() {
               ))}
             </div>
             <div className="songs-foot">
-              <button className="btn" onClick={() => (saveCopy(`${songName} (cópia)`), setMenuOpen(false), setFlash(true))}>
+              <button className="btn" onClick={() => (attempt(() => saveCopy(`${songName} (cópia)`)), setMenuOpen(false))}>
                 Salvar como cópia
               </button>
+              <button className="btn" onClick={() => fileInput.current?.click()}>
+                Importar arquivo…
+              </button>
+              {importError && (
+                <div className="warn-bar small" role="alert">
+                  {importError}
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
+      <input ref={fileInput} type="file" accept=".json,application/json" hidden aria-label="Importar arquivo" onChange={(e) => void onImport(e.target.files?.[0])} />
     </div>
   );
 }

@@ -12,15 +12,42 @@ import { buildTemplate, type TemplateId } from "../core/templates";
 import type { Meter } from "../core/timeline";
 import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
+import { sanitizeContent, type SongContent } from "../export/json";
 import { repository, type RestrictionMode, type SavedSongMeta, type Session } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
 
 export const UNTITLED = "Sem título";
 
+/** JSON com chaves ordenadas: o mesmo conteúdo dá o mesmo texto, seja qual for a ordem de criação dos campos. */
+const stableStringify = (value: unknown) =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+
 /** Conteúdo que conta como "a música" para salvar e detectar alterações. */
 export const contentHash = (s: { song: Song; scaleId: string; tonic: number | null }) =>
-  JSON.stringify([s.scaleId, s.tonic, s.song]);
+  stableStringify([s.scaleId, s.tonic, s.song]);
+
+/**
+ * Reescreve um hash guardado (o próprio conteúdo em JSON) na forma canônica atual, passando pelo mesmo
+ * saneamento do carregamento — sem isso, reabrir o app acusaria "alterações não salvas" falsas.
+ */
+export function normalizeHash(hash: string | null): string | null {
+  if (hash === null) return null;
+  try {
+    const [scaleId, tonic, song] = JSON.parse(hash) as unknown[];
+    const content = sanitizeContent({ scaleId, tonic, song });
+    return content ? contentHash(content) : hash;
+  } catch {
+    return hash;
+  }
+}
+
+/** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
+type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
 type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi"> & {
   midi: MidiSettings;
@@ -30,8 +57,8 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   savedSongs: SavedSongMeta[];
   selectedItem: number;
   selectedChord: string | null;
-  past: Song[];
-  future: Song[];
+  past: Snapshot[];
+  future: Snapshot[];
   playing: boolean;
   loop: boolean;
   playScope: "song" | "block";
@@ -51,6 +78,7 @@ type Actions = {
   setSoundOnClick: (v: boolean) => void;
   setMetronome: (v: boolean) => void;
   setFollowScale: (v: boolean) => void;
+  setCountIn: (v: boolean) => void;
   setLoop: (v: boolean) => void;
   setPlayScope: (s: "song" | "block") => void;
   setPlaying: (p: boolean) => void;
@@ -92,12 +120,14 @@ type Actions = {
   redo: () => void;
 
   /** Salva a música atual (cria uma nova entrada se ainda não foi salva). */
-  saveSong: () => void;
+  saveSong: () => boolean;
   /** Salva uma cópia com outro nome e passa a editar a cópia. */
-  saveCopy: (name: string) => void;
+  saveCopy: (name: string) => boolean;
   renameSong: (name: string) => void;
   newSong: () => void;
   openSong: (id: string) => boolean;
+  /** Carrega conteúdo externo (arquivo/link) como música nova, ainda não salva. */
+  loadExternal: (file: SongContent & { name: string }) => void;
   deleteSong: (id: string) => void;
 };
 
@@ -116,17 +146,19 @@ function initialState(): State {
     soundOnClick: true,
     metronome: false,
     followScale: false,
+    countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, ...rest } = base;
+  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, ...rest } = base;
   return {
     ...rest,
+    countIn,
     // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
     midi: { ...DEFAULT_MIDI, ...midi, enabled: false },
     songId,
     songName,
     // Sessão antiga sem hash: considera o estado atual como "salvo" para não acusar alteração falsa.
-    savedHash: savedHash === undefined ? contentHash(base) : savedHash,
+    savedHash: savedHash === undefined ? contentHash(base) : normalizeHash(savedHash),
     savedSongs: repository.listSongs(),
     selectedItem: 0,
     selectedChord: null,
@@ -165,13 +197,22 @@ function cloneBlock(b: Block, name: string): Block {
   return { ...structuredClone(b), id: newId("b"), name, chords: b.chords.map((c) => ({ ...structuredClone(c), id: newChordId() })) };
 }
 
+/** Ajusta a seleção ao restaurar uma música: bloco existente e acorde ainda presente. */
+function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord"> {
+  const selectedItem = Math.max(0, Math.min(s.selectedItem, song.arrangement.length - 1));
+  const block = selectBlock({ song, selectedItem });
+  const keep = s.selectedChord !== null && !!block?.chords.some((c) => c.id === s.selectedChord);
+  return { selectedItem, selectedChord: keep ? s.selectedChord : null };
+}
+
 export const useStore = create<Store>()((set, get) => {
   /** Aplica uma edição à música guardando o estado anterior no histórico. */
   const commit = (fn: (song: Song, s: State) => void, extra: Partial<State> = {}) => {
     const s = get();
     const next = structuredClone(s.song);
     fn(next, s);
-    set({ song: next, past: [...s.past, s.song].slice(-HISTORY_LIMIT), future: [], ...extra });
+    const prev: Snapshot = { song: s.song, tonic: s.tonic, scaleId: s.scaleId };
+    set({ song: next, past: [...s.past, prev].slice(-HISTORY_LIMIT), future: [], ...extra });
   };
 
   const currentBlock = (song: Song, s: State): Block | null => {
@@ -189,11 +230,10 @@ export const useStore = create<Store>()((set, get) => {
     ...initialState(),
 
     setScale: (scaleId) => {
-      const extra: Partial<State> = { scaleId };
-      if (get().followScale) {
-        const first = suggestionsFor(getScale(scaleId)).instruments[0];
-        commit((song) => void (song.instrument = first), extra);
-      } else set(extra);
+      if (get().scaleId === scaleId) return;
+      const follow = get().followScale;
+      const first = follow ? suggestionsFor(getScale(scaleId)).instruments[0] : undefined;
+      commit((song) => void (first && (song.instrument = first)), { scaleId });
     },
 
     setTonic: (pc) => {
@@ -214,21 +254,29 @@ export const useStore = create<Store>()((set, get) => {
         );
         return;
       }
-      set({ tonic: pc });
-      const block = selectBlock(get());
-      if (block && !block.chords.length && !s.startWithSelected) {
-        const chord = tonicChordFor(get(), block);
-        if (chord) commit((song, st) => void currentBlock(song, st)!.chords.push(chord), { selectedChord: chord.id });
-      }
+      // Primeira definição: um único commit (tônica + acorde da tônica, se for o caso).
+      const block = selectBlock(s);
+      const chord = block && !block.chords.length && !s.startWithSelected ? tonicChordFor({ ...s, tonic: pc }, block) : null;
+      commit(
+        (song, st) => {
+          if (chord) currentBlock(song, st)!.chords.push(chord);
+        },
+        { tonic: pc, ...(chord ? { selectedChord: chord.id } : {}) },
+      );
     },
 
-    setKey: (tonic, scaleId) => set({ tonic, scaleId }),
+    setKey: (tonic, scaleId) => {
+      const s = get();
+      if (s.tonic === tonic && s.scaleId === scaleId) return;
+      commit(() => {}, { tonic, scaleId });
+    },
     setAccidentals: (accidentals) => set({ accidentals }),
     setMode: (mode) => set({ mode }),
     setStartWithSelected: (startWithSelected) => set({ startWithSelected }),
     setSoundOnClick: (soundOnClick) => set({ soundOnClick }),
     setMetronome: (metronome) => set({ metronome }),
     setFollowScale: (followScale) => set({ followScale }),
+    setCountIn: (countIn) => set({ countIn }),
     setLoop: (loop) => set({ loop }),
     setPlayScope: (playScope) => set({ playScope }),
     setPlaying: (playing) => set(playing ? { playing } : { playing, playhead: null }),
@@ -414,8 +462,13 @@ export const useStore = create<Store>()((set, get) => {
         const b = song.blocks[blockId];
         if (!b) return;
         for (const [k, v] of Object.entries(patch) as [keyof typeof patch, unknown][]) {
-          if (v === undefined) delete b[k];
-          else Object.assign(b, { [k]: v });
+          let value = v;
+          if (k === "bpm" || k === "midiChannel") {
+            const [lo, hi] = k === "bpm" ? [30, 300] : [1, 16];
+            value = typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : undefined;
+          }
+          if (value === undefined) delete b[k];
+          else Object.assign(b, { [k]: value });
         }
       }),
 
@@ -442,13 +495,17 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       const id = s.songId ?? newId("s");
       const name = s.songName.trim() || UNTITLED;
-      repository.saveSong({ id, name, updatedAt: Date.now(), scaleId: s.scaleId, tonic: s.tonic, song: s.song });
+      if (!repository.saveSong({ id, name, updatedAt: Date.now(), scaleId: s.scaleId, tonic: s.tonic, song: s.song })) return false;
       set({ songId: id, songName: name, savedHash: contentHash(s), savedSongs: repository.listSongs() });
+      return true;
     },
 
     saveCopy: (name) => {
-      set({ songId: null, songName: name.trim() || `${get().songName} (cópia)` });
-      get().saveSong();
+      const { songId, songName } = get();
+      set({ songId: null, songName: name.trim() || `${songName} (cópia)` });
+      const ok = get().saveSong();
+      if (!ok) set({ songId, songName });
+      return ok;
     },
 
     renameSong: (songName) => {
@@ -497,6 +554,24 @@ export const useStore = create<Store>()((set, get) => {
       return true;
     },
 
+    loadExternal: (file) => {
+      // Campos explícitos: `file` pode ser um SongFile (com `format`/`version`), que não pertencem ao estado.
+      const { name, scaleId, tonic, song } = structuredClone(file);
+      set({
+        scaleId,
+        tonic,
+        song,
+        songId: null,
+        songName: name,
+        savedHash: null,
+        selectedItem: 0,
+        selectedChord: null,
+        past: [],
+        future: [],
+        playhead: null,
+      });
+    },
+
     deleteSong: (id) => {
       repository.deleteSong(id);
       const s = get();
@@ -508,39 +583,75 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       const prev = s.past[s.past.length - 1];
       if (!prev) return;
-      set({ song: prev, past: s.past.slice(0, -1), future: [s.song, ...s.future], selectedItem: Math.min(s.selectedItem, prev.arrangement.length - 1) });
+      set({
+        ...prev,
+        past: s.past.slice(0, -1),
+        future: [{ song: s.song, tonic: s.tonic, scaleId: s.scaleId }, ...s.future],
+        ...fixSelection(s, prev.song),
+      });
     },
     redo: () => {
       const s = get();
       const next = s.future[0];
       if (!next) return;
-      set({ song: next, future: s.future.slice(1), past: [...s.past, s.song], selectedItem: Math.min(s.selectedItem, next.arrangement.length - 1) });
+      set({
+        ...next,
+        future: s.future.slice(1),
+        past: [...s.past, { song: s.song, tonic: s.tonic, scaleId: s.scaleId }],
+        ...fixSelection(s, next.song),
+      });
     },
   };
 });
 
 // Persistência: salva a sessão (debounce) sempre que algo relevante muda.
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-useStore.subscribe((s) => {
+let lastSessionOk = true;
+
+function buildSession(s: State): Session {
+  return {
+    version: 1,
+    scaleId: s.scaleId,
+    tonic: s.tonic,
+    accidentals: s.accidentals,
+    mode: s.mode,
+    startWithSelected: s.startWithSelected,
+    soundOnClick: s.soundOnClick,
+    metronome: s.metronome,
+    followScale: s.followScale,
+    countIn: s.countIn,
+    midi: s.midi,
+    song: s.song,
+    songId: s.songId,
+    songName: s.songName,
+    savedHash: s.savedHash,
+  };
+}
+
+let sessionDiscarded = false;
+
+/** Grava a sessão agora, cancelando o debounce pendente. */
+export function flushSession(): void {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    repository.saveSession({
-      version: 1,
-      scaleId: s.scaleId,
-      tonic: s.tonic,
-      accidentals: s.accidentals,
-      mode: s.mode,
-      startWithSelected: s.startWithSelected,
-      soundOnClick: s.soundOnClick,
-      metronome: s.metronome,
-      followScale: s.followScale,
-      midi: s.midi,
-      song: s.song,
-      songId: s.songId,
-      songName: s.songName,
-      savedHash: s.savedHash,
-    });
-  }, 300);
+  if (sessionDiscarded) return;
+  lastSessionOk = repository.saveSession(buildSession(useStore.getState()));
+}
+
+/** Apaga a sessão guardada e para de gravá-la (recuperação de erro; segue-se um recarregamento). */
+export function discardSession(): void {
+  sessionDiscarded = true;
+  clearTimeout(saveTimer);
+  repository.clearSession();
+}
+
+/** A sessão não está sendo persistida e há conteúdo não salvo (risco de perda). */
+export function sessionAtRisk(): boolean {
+  return !sessionDiscarded && (!lastSessionOk || !repository.persistent) && selectDirty(useStore.getState());
+}
+
+useStore.subscribe(() => {
+  clearTimeout(saveTimer);
+  if (!sessionDiscarded) saveTimer = setTimeout(flushSession, 300);
 });
 
 /** O acorde cabe na escala atual? (sem tônica, tudo cabe) */
