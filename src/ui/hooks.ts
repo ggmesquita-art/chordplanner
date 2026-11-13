@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { instrumentStatus, play, previewNotes, stop, subscribeStatus } from "../audio/engine";
+import { instrumentProgress, instrumentStatus, play, previewNotes, stop, subscribeStatus } from "../audio/engine";
 import { configureMidi, midiSnapshot, subscribeMidi } from "../audio/midi";
 import type { Chord } from "../core/chords";
 import { makeSpeller, type Speller } from "../core/pitch";
-import { expandArrangement } from "../core/song";
+import { expandArrangement, expandRegion } from "../core/song";
 import { voiceChord } from "../core/voicing";
-import { flushSession, selectBlock, selectCtx, sessionAtRisk, useStore } from "../state/store";
+import { flushSession, selectBlock, selectCtx, selectRegion, sessionAtRisk, useStore } from "../state/store";
 
 export function useCtx() {
   const { tonic, scaleId } = useStore(useShallow((s) => ({ tonic: s.tonic, scaleId: s.scaleId })));
@@ -27,6 +27,11 @@ export function useInstrumentStatus(id: string) {
   return useSyncExternalStore(subscribeStatus, () => instrumentStatus(id));
 }
 
+/** Progresso (0–1) do carregamento de samples, ou null se desconhecido. */
+export function useInstrumentProgress(id: string) {
+  return useSyncExternalStore(subscribeStatus, () => instrumentProgress(id));
+}
+
 /** Instrumento efetivo do bloco selecionado (override ou global). */
 export function currentInstrument(): string {
   const s = useStore.getState();
@@ -44,8 +49,9 @@ export async function togglePlay() {
     s.setPlaying(false);
     return;
   }
-  const only = s.playScope === "block" ? [s.selectedItem] : undefined;
-  const expanded = expandArrangement(s.song, only);
+  const region = s.playScope === "region" ? selectRegion(s) : null;
+  const only = s.playScope === "block" || s.playScope === "region" ? [s.selectedItem] : undefined;
+  const expanded = region ? expandRegion(s.song, s.selectedItem, region.from, region.to) : expandArrangement(s.song, only);
   if (!expanded.events.length) return;
   s.setPlaying(true);
   await play(expanded, {

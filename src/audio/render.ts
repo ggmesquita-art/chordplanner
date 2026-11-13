@@ -3,7 +3,7 @@
 // saída MIDI e pelo export .mid — assim o arquivo soa como o que se ouve.
 
 import type { Expanded, PlaybackPattern } from "../core/song";
-import { secondsPerBeat, swingOffset } from "../core/timeline";
+import { isCompound, secondsPerBeat, swingOffset } from "../core/timeline";
 import { fitToRange, voiceChord } from "../core/voicing";
 import { getInstrumentDef, type InstrumentDef } from "./instruments";
 
@@ -106,12 +106,41 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
 
 export type CountInClick = { time: number; accent: boolean };
 
-/** Um compasso de contagem no andamento e na fórmula do primeiro acorde. */
+/**
+ * Cliques do metrônomo para todos os eventos, com tempos relativos ao início.
+ * Acento no tempo 1 de cada compasso (contado por bloco/repetição). Em fórmulas
+ * compostas (6/8, 12/8) só há clique no início de cada pulso (a cada 3 tempos).
+ */
+export function metronomeClicks(expanded: Expanded): CountInClick[] {
+  const clicks: CountInClick[] = [];
+  let blockKey = "";
+  let beatInBlock = 0;
+  for (const ev of expanded.events) {
+    const key = `${ev.itemIndex}:${ev.repetition}`;
+    if (key !== blockKey) {
+      blockKey = key;
+      beatInBlock = 0;
+    }
+    const firstBeat = beatInBlock;
+    beatInBlock += ev.beats;
+    const spb = secondsPerBeat(ev.bpm);
+    const step = isCompound(ev.meter) ? 3 : 1;
+    for (let b = 0; b < ev.beats; b++) {
+      const beat = firstBeat + b;
+      if (beat % step !== 0) continue;
+      clicks.push({ time: ev.startSec + b * spb, accent: beat % ev.meter[0] === 0 });
+    }
+  }
+  return clicks;
+}
+
+/** Um compasso de contagem no andamento e na fórmula do primeiro acorde (compostos: um clique por pulso). */
 export function countIn(expanded: Expanded): { seconds: number; clicks: CountInClick[] } {
   const first = expanded.events[0];
   if (!first) return { seconds: 0, clicks: [] };
   const spb = secondsPerBeat(first.bpm);
-  const clicks = Array.from({ length: first.meter[0] }, (_, i) => ({ time: i * spb, accent: i === 0 }));
+  const step = isCompound(first.meter) ? 3 : 1;
+  const clicks = Array.from({ length: first.meter[0] / step }, (_, i) => ({ time: i * step * spb, accent: i === 0 }));
   return { seconds: first.meter[0] * spb, clicks };
 }
 

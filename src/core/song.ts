@@ -79,53 +79,70 @@ export function blockIsIncomplete(song: Song, b: Block): number {
   return missingBeats(blockBeats(b), blockMeter(song, b));
 }
 
+type Acc = { events: TimedChord[]; markers: Marker[]; tempoMap: TempoPoint[]; sec: number; beatAbs: number; bars: number };
+
+const newAcc = (): Acc => ({ events: [], markers: [], tempoMap: [], sec: 0, beatAbs: 0, bars: 0 });
+
+const finish = (a: Acc): Expanded => ({ events: a.events, markers: a.markers, tempoMap: a.tempoMap, totalSec: a.sec, totalBars: a.bars });
+
+/** Acrescenta ao acumulador `repeat` passadas dos acordes `from..to` (índices reais) do bloco do item. */
+function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from = 0, to = Infinity) {
+  const block = song.blocks[song.arrangement[itemIndex]?.blockId];
+  if (!block) return;
+  const bpm = blockBpm(song, block);
+  const meter = blockMeter(song, block);
+  const spb = secondsPerBeat(bpm);
+  const last = a.tempoMap[a.tempoMap.length - 1];
+  if (!last || last.bpm !== bpm || last.meter.join("/") !== meter.join("/")) {
+    a.tempoMap.push({ startSec: a.sec, bpm, meter });
+  }
+  a.markers.push({ itemIndex, blockId: block.id, name: block.name, startSec: a.sec, startBar: a.bars, bpm, meter });
+
+  for (let rep = 0; rep < repeat; rep++) {
+    let beatsDone = 0;
+    block.chords.forEach((chord, chordIndex) => {
+      if (chordIndex < from || chordIndex > to) return;
+      a.events.push({
+        chord,
+        blockId: block.id,
+        itemIndex,
+        repetition: rep,
+        chordIndex,
+        startBeat: a.beatAbs,
+        beats: chord.duration,
+        startSec: a.sec,
+        durationSec: chord.duration * spb,
+        bpm,
+        meter,
+        pattern: block.pattern ?? song.pattern,
+        instrument: block.instrument ?? song.instrument,
+      });
+      a.beatAbs += chord.duration;
+      a.sec += chord.duration * spb;
+      beatsDone += chord.duration;
+    });
+    a.bars += (from === 0 && to === Infinity ? blockBeats(block) : beatsDone) / meter[0];
+  }
+}
+
 /** Desenrola o arranjo (ou só os itens indicados) em eventos absolutos. */
 export function expandArrangement(song: Song, onlyItems?: number[]): Expanded {
-  const events: TimedChord[] = [];
-  const markers: Marker[] = [];
-  const tempoMap: TempoPoint[] = [];
-  let sec = 0;
-  let beatAbs = 0;
-  let bars = 0;
-
+  const acc = newAcc();
   song.arrangement.forEach((item, itemIndex) => {
     if (onlyItems && !onlyItems.includes(itemIndex)) return;
-    const block = song.blocks[item.blockId];
-    if (!block) return;
-    const bpm = blockBpm(song, block);
-    const meter = blockMeter(song, block);
-    const spb = secondsPerBeat(bpm);
-    const last = tempoMap[tempoMap.length - 1];
-    if (!last || last.bpm !== bpm || last.meter.join("/") !== meter.join("/")) {
-      tempoMap.push({ startSec: sec, bpm, meter });
-    }
-    markers.push({ itemIndex, blockId: block.id, name: block.name, startSec: sec, startBar: bars, bpm, meter });
-
-    for (let rep = 0; rep < item.repeat; rep++) {
-      block.chords.forEach((chord, chordIndex) => {
-        events.push({
-          chord,
-          blockId: block.id,
-          itemIndex,
-          repetition: rep,
-          chordIndex,
-          startBeat: beatAbs,
-          beats: chord.duration,
-          startSec: sec,
-          durationSec: chord.duration * spb,
-          bpm,
-          meter,
-          pattern: block.pattern ?? song.pattern,
-          instrument: block.instrument ?? song.instrument,
-        });
-        beatAbs += chord.duration;
-        sec += chord.duration * spb;
-      });
-      bars += blockBeats(block) / meter[0];
-    }
+    appendBlock(acc, song, itemIndex, item.repeat);
   });
+  return finish(acc);
+}
 
-  return { events, markers, tempoMap, totalSec: sec, totalBars: bars };
+/** Uma passada (sem `repeat`) dos acordes `from..to` (inclusive) do bloco do item; os índices dos eventos são os reais. */
+export function expandRegion(song: Song, itemIndex: number, from: number, to: number): Expanded {
+  const acc = newAcc();
+  const n = song.blocks[song.arrangement[itemIndex]?.blockId]?.chords.length ?? 0;
+  const lo = Math.max(0, Math.min(from, to));
+  const hi = Math.min(n - 1, Math.max(from, to));
+  if (n > 0 && lo <= hi) appendBlock(acc, song, itemIndex, 1, lo, hi);
+  return finish(acc);
 }
 
 let idCounter = 0;

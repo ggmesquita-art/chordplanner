@@ -6,14 +6,27 @@ import { getScale } from "../../core/scales";
 import { voiceChord } from "../../core/voicing";
 import { makeChord } from "../../core/chords";
 import { selectChord, selectCtx, useStore } from "../../state/store";
-import { useInstrumentStatus } from "../hooks";
+import { useInstrumentProgress, useInstrumentStatus } from "../hooks";
 import { usePopover } from "../usePopover";
 
 const normalize = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 function StatusDot({ id }: { id: string }) {
   const status = useInstrumentStatus(id);
-  if (status === "loading") return <span className="spinner" title="Carregando samples…" />;
+  const progress = useInstrumentProgress(id);
+  if (status === "loading") {
+    const pct = progress === null ? null : Math.round(progress * 100);
+    return (
+      <>
+        <span className="spinner" title="Carregando samples…" />
+        {pct !== null && (
+          <span className="mono small" aria-label={`Carregando ${pct}%`}>
+            {pct}%
+          </span>
+        )}
+      </>
+    );
+  }
   if (status === "error") return <span className="warn small" title="Falha ao carregar samples; usando synth">⚠</span>;
   return null;
 }

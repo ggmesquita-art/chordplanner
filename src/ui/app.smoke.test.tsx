@@ -11,6 +11,7 @@ vi.mock("../audio/engine", () => ({
   preload: vi.fn(),
   subscribeStatus: () => () => {},
   instrumentStatus: () => "ready",
+  instrumentProgress: () => null,
 }));
 
 import App from "../App";

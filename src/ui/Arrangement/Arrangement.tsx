@@ -1,17 +1,22 @@
 import { useState } from "react";
-import { blockBeats, blockMeter, type Block } from "../../core/song";
+import { BLOCK_COLORS, blockBeats, blockMeter, type Block } from "../../core/song";
 import { TEMPLATES, type TemplateId } from "../../core/templates";
 import { useStore } from "../../state/store";
+import { barTicks } from "./barTicks";
 
 export function Arrangement() {
   const song = useStore((s) => s.song);
   const selected = useStore((s) => s.selectedItem);
   const playhead = useStore((s) => s.playhead);
-  const { selectItem, addBlock, addLinkedInstance, makeUnique, removeItem, moveItem, setRepeat, renameBlock, applyTemplate } = useStore.getState();
+  const { selectItem, addBlock, addLinkedInstance, makeUnique, removeItem, moveItem, setRepeat, renameBlock, applyTemplate, setBlockProps } = useStore.getState();
   const [editing, setEditing] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   const [confirmTemplate, setConfirmTemplate] = useState<TemplateId | null>(null);
 
+  // A confirmação só vale enquanto o mesmo bloco estiver selecionado.
+  const pendingRemove = confirmRemove === selected ? confirmRemove : null;
+  const removeTitle = (n: number) => (n > 1 ? "Remove só esta instância; o bloco continua nas outras" : "Remover do arranjo");
   const usage = new Map<string, number>();
   for (const it of song.arrangement) usage.set(it.blockId, (usage.get(it.blockId) ?? 0) + 1);
 
@@ -79,7 +84,7 @@ export function Arrangement() {
                 else moveItem(dragFrom, i);
                 setDragFrom(null);
               }}
-              onClick={() => selectItem(i)}
+              onClick={() => (selectItem(i), setConfirmRemove(null))}
             >
               <div className="block-top">
                 {editing === i ? (
@@ -111,6 +116,13 @@ export function Arrangement() {
                   {block.chords.length} ac. · {Math.round(bars * 100) / 100} comp.
                 </span>
               </div>
+              <div className="bar-ticks" aria-hidden>
+                {barTicks(start, bars).map((t) => (
+                  <span key={t.bar} style={{ left: `${t.at * 100}%` }}>
+                    {t.bar}
+                  </span>
+                ))}
+              </div>
               {i === selected && (
                 <div className="block-actions" onClick={(e) => e.stopPropagation()}>
                   <button className="icon-btn" onClick={() => setRepeat(i, item.repeat - 1)} aria-label="Menos repetições">
@@ -130,11 +142,34 @@ export function Arrangement() {
                   <button className="icon-btn" onClick={() => setEditing(i)} title="Renomear">
                     ✎
                   </button>
-                  {song.arrangement.length > 1 && (
-                    <button className="icon-btn danger" onClick={() => removeItem(i)} title="Remover do arranjo">
-                      🗑
-                    </button>
-                  )}
+                  <div className="color-swatches" role="radiogroup" aria-label="Cor do bloco">
+                    {BLOCK_COLORS.map((c, n) => (
+                      <button
+                        key={c}
+                        className="swatch"
+                        role="radio"
+                        aria-checked={block.color === c}
+                        aria-label={`Cor ${n + 1}`}
+                        style={{ "--sw": c } as React.CSSProperties}
+                        onClick={() => setBlockProps(block.id, { color: c })}
+                      />
+                    ))}
+                  </div>
+                  {song.arrangement.length > 1 &&
+                    (pendingRemove === i ? (
+                      <span className="confirm small">
+                        <button className="btn danger" onClick={() => (removeItem(i), setConfirmRemove(null))} title={removeTitle(usage.get(block.id) ?? 0)}>
+                          Excluir
+                        </button>
+                        <button className="btn" onClick={() => setConfirmRemove(null)} aria-label="Cancelar exclusão">
+                          ✕
+                        </button>
+                      </span>
+                    ) : (
+                      <button className="icon-btn danger" onClick={() => setConfirmRemove(i)} title={removeTitle(usage.get(block.id) ?? 0)} aria-label="Remover do arranjo">
+                        🗑
+                      </button>
+                    ))}
                 </div>
               )}
             </div>

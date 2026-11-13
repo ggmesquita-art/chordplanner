@@ -33,37 +33,37 @@
 ## Etapa 1 — Fechar a v1
 
 Edição da progressão (§3.4, §3.8)
-- [ ] Mudar a duração arrastando a borda do card (hoje só há botões −/+).
-- [ ] Seletor de grade de edição (½, 1, 2, 4 tempos, compasso inteiro). `DURATION_STEPS` em `src/core/timeline.ts` hoje é `[0.5, 1, 2, 3, 4, 6, 8, 12, 16]`, diferente do design: decidir qual vale.
-- [ ] Ligadura visual quando o acorde cruza a barra de compasso.
-- [ ] Régua contínua em `compasso.tempo` e numeração de compassos ao longo do bloco no arranjo (hoje só no início).
+- [x] Mudar a duração arrastando a borda do card (com alternativa por teclado na alça).
+- [x] Seletor de grade de edição (½, 1, 2, 4 tempos, compasso inteiro). Vale a grade do design: `DURATION_STEPS` foi removido e os botões −/+ andam pela grade.
+- [x] Ligadura visual quando o acorde cruza a barra de compasso.
+- [x] Régua contínua em `compasso.tempo` e numeração de compassos ao longo do bloco no arranjo (hoje só no início).
 
 Reprodução (§3.8, §5.1)
-- [ ] Tocar uma região selecionada (hoje: arranjo inteiro ou bloco).
-- [ ] Agrupar a pulsação em compassos compostos (6/8 = 2 pulsos); `isCompound` existe e não é usada.
-- [ ] Aplicar o swing também ao metrônomo e ao cursor.
+- [x] Tocar uma região selecionada (Shift+clique marca a região; escopo "Região" no transporte).
+- [x] Agrupar a pulsação em compassos compostos (6/8 = 2 pulsos) no metrônomo e na contagem.
+- [x] Swing no metrônomo e no cursor: conferido, nada a mudar — o swing só atrasa subdivisões internas do padrão; tempos inteiros e o ataque do acorde não se deslocam.
 
 Roda de acordes (§3.3)
-- [ ] Toggle para a lista por graus (hoje sempre visível).
-- [ ] Tocar o acorde no hover, respeitando "Som ao clicar".
-- [ ] Destacar notas em comum nos três anéis (hoje só no externo).
-- [ ] Menu radial de qualidades extras fecha com Esc e clique fora.
+- [x] Toggle para a lista por graus.
+- [x] Tocar o acorde no hover: opção própria "Som ao passar o mouse", desligada por padrão.
+- [x] Destacar notas em comum nos três anéis.
+- [x] Menu radial de qualidades extras fecha com Esc e clique fora.
 
 Modificadores e blocos (§3.5, §3.8, §4)
-- [ ] Opção conflitante desabilitada com tooltip, em vez de removida em silêncio (`src/core/modifiers.ts`).
-- [ ] Trocar a cor do bloco; pedir confirmação ao excluir um bloco.
+- [x] Opção conflitante desabilitada com tooltip. Alterações (♭9, ♯11…) continuam podendo conviver com a extensão natural: o núcleo troca a nota, o que permite acordes como 13(♭9).
+- [x] Trocar a cor do bloco; pedir confirmação ao excluir um bloco.
 
 Instrumentos e layout (§3.1, §3.9, §5.2)
-- [ ] Progresso de carregamento de samples (hoje só um spinner).
-- [ ] Aviso de notas omitidas por tessitura também durante a reprodução.
-- [ ] No celular, modificadores em gaveta inferior.
+- [x] Progresso percentual do carregamento de samples (não conferido com download real).
+- [x] Aviso de notas omitidas por tessitura em cada card da progressão.
+- [x] No celular, modificadores em gaveta inferior.
 
 ## Etapa 2 — Acessibilidade (§8)
 
 - [ ] Progressão: Enter seleciona o card; reordenar pelo teclado.
 - [ ] Arranjo: cards focáveis e reordenáveis pelo teclado.
 - [ ] Opções de escala e de instrumento navegáveis pelo teclado; setas nos controles segmentados do cabeçalho.
-- [ ] `prefers-reduced-motion` para a rotação da roda e o pulso do acorde tocando.
+- [x] `prefers-reduced-motion` para a rotação da roda e o pulso do acorde tocando.
 - [ ] Ícone além da cor em todos os estados da roda (✓ diatônico, ◐ cromático, ⚠ fora).
 - [ ] Toggle manual de tema claro/escuro (hoje só segue o sistema).
 - [ ] Menu "Abrir": remover o botão aninhado dentro de `role="option"`.

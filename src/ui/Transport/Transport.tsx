@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { blockMeter } from "../../core/song";
 import type { PlaybackPattern } from "../../core/song";
 import { METERS, meterLabel, type Meter } from "../../core/timeline";
-import { useStore } from "../../state/store";
+import { selectRegion, useStore } from "../../state/store";
 import { togglePlay } from "../hooks";
 import { NumberField } from "../NumberField";
 import { PATTERNS } from "../patterns";
@@ -14,6 +14,7 @@ export function Transport() {
   const playhead = useStore((s) => s.playhead);
   const loop = useStore((s) => s.loop);
   const scope = useStore((s) => s.playScope);
+  const hasRegion = useStore((s) => selectRegion(s) !== null);
   const metronome = useStore((s) => s.metronome);
   const countIn = useStore((s) => s.countIn);
   const follow = useStore((s) => s.followPlayback);
@@ -50,6 +51,16 @@ export function Transport() {
         </button>
         <button className={scope === "block" ? "on" : ""} onClick={() => setPlayScope("block")} aria-checked={scope === "block"} role="radio">
           Bloco
+        </button>
+        <button
+          className={scope === "region" ? "on" : ""}
+          onClick={() => setPlayScope("region")}
+          aria-checked={scope === "region"}
+          role="radio"
+          disabled={!hasRegion}
+          title={hasRegion ? "Tocar só os acordes da região selecionada" : "Selecione um acorde e Shift+clique em outro para marcar a região"}
+        >
+          Região
         </button>
       </div>
       <label className="field">

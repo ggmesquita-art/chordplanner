@@ -1,11 +1,14 @@
+import { useEffect, useState } from "react";
 import { getInstrumentDef } from "../../audio/instruments";
 import {
+  conflictingModifier,
   hasModifier,
   inversionBass,
   inversionCount,
   modifierStatus,
   resolveChord,
   type Modifier,
+  sameModifier,
   type NoteStatus,
 } from "../../core/modifiers";
 import { mod12 } from "../../core/pitch";
@@ -59,6 +62,7 @@ const STATUS_TEXT: Record<NoteStatus, string> = {
   tension: "tensão idiomática (fora da escala)",
   outside: "fora da escala, sem uso idiomático",
 };
+const labelOf = (m: Modifier) => GROUPS.flatMap((g) => g.items).find(([x]) => sameModifier(x, m))?.[1] ?? "";
 const ORDINAL = ["Fund.", "1ª", "2ª", "3ª", "4ª", "5ª", "6ª"];
 
 export function ModifierPanel() {
@@ -68,11 +72,35 @@ export function ModifierPanel() {
   const ctx = useCtx();
   const spell = useSpeller();
   const actions = useStore.getState();
+  const [open, setOpen] = useState(false);
+  const chordId = chord?.id ?? null;
+
+  // Gaveta (celular): abre ao selecionar um acorde (ajuste de estado durante o render); Esc fecha.
+  const [seenChord, setSeenChord] = useState(chordId);
+  if (seenChord !== chordId) {
+    setSeenChord(chordId);
+    if (chordId) setOpen(true);
+  }
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const drawerToggle = (
+    <button className="btn drawer-toggle" aria-expanded={open} aria-label={open ? "Recolher modificadores" : "Expandir modificadores"} onClick={() => setOpen(!open)}>
+      {open ? "▾" : "▴"}
+    </button>
+  );
 
   if (!chord || !block) {
     return (
-      <section className="modifiers empty" aria-label="Modificadores">
-        <h2>Modificadores</h2>
+      <section className={`modifiers empty ${open ? "open" : ""}`} aria-label="Modificadores">
+        <div className="mod-bar">
+          <h2>Modificadores</h2>
+          {drawerToggle}
+        </div>
         <p className="muted">Selecione um acorde da progressão para enriquecer a harmonia com extensões, suspensões, alterações e inversões.</p>
         <Presets />
       </section>
@@ -103,10 +131,13 @@ export function ModifierPanel() {
   const statusByPc = new Map(resolved.pcs.map((pc, i) => [pc, resolved.status[i]]));
 
   return (
-    <section className="modifiers" aria-label="Modificadores">
-      <h2>
-        Modificadores <span className="muted">— acorde {index + 1}:</span> <span className="accent">{resolved.symbol}</span>
-      </h2>
+    <section className={`modifiers ${open ? "open" : ""}`} aria-label="Modificadores">
+      <div className="mod-bar">
+        <h2>
+          Modificadores <span className="muted">— acorde {index + 1}:</span> <span className="accent">{resolved.symbol}</span>
+        </h2>
+        {drawerToggle}
+      </div>
 
       {GROUPS.map((g) => (
         <fieldset key={g.title} className="mod-group">
@@ -116,14 +147,22 @@ export function ModifierPanel() {
               const active = hasModifier(chord.modifiers, m);
               const st = modifierStatus(chord, m, ctx);
               const disabled = !active && !allowed(st);
+              const clash = conflictingModifier(chord.modifiers, m);
               return (
                 <button
                   key={label}
-                  className={`mod ${st} ${active ? "active" : ""}`}
+                  className={`mod ${st} ${active ? "active" : ""} ${clash && !disabled ? "conflict" : ""}`}
                   disabled={disabled}
                   aria-pressed={active}
-                  title={`${label}: ${STATUS_TEXT[st]}${disabled ? ` — bloqueado no modo ${mode === "strict" ? "Estrito" : "Colorido"}` : ""}`}
-                  onClick={() => toggle(m)}
+                  aria-disabled={clash && !disabled ? true : undefined}
+                  title={
+                    disabled
+                      ? `${label}: ${STATUS_TEXT[st]} — bloqueado no modo ${mode === "strict" ? "Estrito" : "Colorido"}`
+                      : clash
+                        ? `Conflita com ${labelOf(clash)} — remova-o primeiro`
+                        : `${label}: ${STATUS_TEXT[st]}`
+                  }
+                  onClick={() => !clash && toggle(m)}
                 >
                   <span className="mod-icon" aria-hidden>
                     {ICON[st]}

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { getInstrumentDef } from "../../audio/instruments";
 import { chordFits, chromaticFunction, romanFor } from "../../core/diatonic";
 import { chordSymbol } from "../../core/modifiers";
 import { blockBeats, blockBpm, blockMeter, type PlaybackPattern } from "../../core/song";
-import { DURATION_STEPS, METERS, formatPosition, meterLabel, missingBeats, type Meter } from "../../core/timeline";
-import { useStore } from "../../state/store";
+import { GRIDS, METERS, barLinesWithin, formatPosition, gridBeats, meterLabel, missingBeats, stepDuration, type Grid, type Meter } from "../../core/timeline";
+import { fitToRange, voiceChord } from "../../core/voicing";
+import { selectRegion, useStore } from "../../state/store";
 import { songToText } from "../../export/text";
 import { downloadMidi, songToMidi } from "../../export/midi";
 import { exportJson, shareUrl } from "../fileActions";
@@ -12,12 +14,40 @@ import { NumberField } from "../NumberField";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { InstrumentPicker } from "../InstrumentPicker/InstrumentPicker";
 import { PATTERNS } from "../patterns";
+import { ResizeHandle } from "./ResizeHandle";
 
-const stepDuration = (d: number, dir: 1 | -1) => {
-  const i = DURATION_STEPS.findIndex((x) => x >= d);
-  const idx = i < 0 ? DURATION_STEPS.length - 1 : DURATION_STEPS[i] === d ? i + dir : dir > 0 ? i : i - 1;
-  return DURATION_STEPS[Math.max(0, Math.min(DURATION_STEPS.length - 1, idx))];
-};
+const GRID_LABEL: Record<string, string> = { "0.5": "½ tempo", "1": "1 tempo", "2": "2 tempos", "4": "4 tempos", bar: "compasso" };
+
+/** Régua do card: marca a cada tempo, marca forte + número nos compassos e ligadura nas barras internas. */
+function Ruler({ start, duration, meter }: { start: number; duration: number; meter: Meter }) {
+  const bpb = meter[0];
+  const marks: { at: number; bar: number | null }[] = [];
+  const first = Math.ceil(start - 1e-9);
+  for (let beat = first; beat < start + duration - 1e-9; beat++) {
+    const at = beat - start;
+    const isBar = beat % bpb === 0;
+    if (duration > 16 && !isBar) continue;
+    marks.push({ at, bar: isBar ? beat / bpb + 1 : null });
+  }
+  const ties = barLinesWithin(start, duration, meter);
+  return (
+    <>
+      <div className="chord-ruler" aria-hidden="true">
+        {marks.map((m) => (
+          <span key={m.at} className={`tick ${m.bar !== null ? "bar" : ""}`} style={{ left: `${(m.at / duration) * 100}%` }}>
+            {m.bar !== null && <span className="bar-num">{m.bar}</span>}
+          </span>
+        ))}
+        {ties.map((t) => (
+          <span key={`t${t}`} className="tie" style={{ left: `${(t / duration) * 100}%` }} title="Atravessa a barra de compasso">
+            ‿
+          </span>
+        ))}
+      </div>
+      <div className="chord-pos mono">{formatPosition(start, meter)}</div>
+    </>
+  );
+}
 
 /** Rola só a linha do tempo (horizontal) para manter o acorde tocando visível, sem mexer na página. */
 function keepVisible(el: HTMLElement | null) {
@@ -102,8 +132,20 @@ export function Progression() {
   const spell = useSpeller();
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [modal, setModal] = useState<TextModalData | null>(null);
+  const [live, setLive] = useState<{ id: string; beats: number } | null>(null);
+  const grid = useStore((s) => s.grid);
+  const region = useStore(useShallow((s) => selectRegion(s)));
+
+  const instrumentId = block?.instrument ?? song.instrument;
+  const chords = block?.chords;
+  const dropped = useMemo(() => {
+    const def = getInstrumentDef(instrumentId);
+    return new Map((chords ?? []).map((c) => [c.id, fitToRange(voiceChord(c), def.range).dropped]));
+  }, [chords, instrumentId]);
 
   if (!block) return null;
+  const unit = gridBeats(grid, blockMeter(song, block));
+  const instrumentName = getInstrumentDef(instrumentId).name;
   const meter = blockMeter(song, block);
   const total = blockBeats(block);
   const missing = missingBeats(total, meter);
@@ -186,6 +228,28 @@ export function Progression() {
           <input type="checkbox" checked={startWithSelected} onChange={(e) => actions.setStartWithSelected(e.target.checked)} />
           Iniciar com o acorde selecionado <span className="muted">(padrão: começa na tônica)</span>
         </label>
+        <label className="field" title="Unidade dos botões − / + e do arraste da borda do card">
+          Grade
+          <select
+            value={String(grid)}
+            onChange={(e) => actions.setGrid((e.target.value === "bar" ? "bar" : Number(e.target.value)) as Grid)}
+            aria-label="Grade de edição"
+          >
+            {GRIDS.map((g) => (
+              <option key={g} value={String(g)}>
+                {GRID_LABEL[String(g)]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {region && (
+          <span className="region-chip">
+            Região: acordes {region.from + 1}–{region.to + 1}
+            <button className="icon-btn tiny" onClick={() => actions.setRegionEnd(null)} aria-label="Desfazer região" title="Desfazer região">
+              ✕
+            </button>
+          </span>
+        )}
         <div className="spacer" />
         <button className="icon-btn" onClick={actions.undo} disabled={!canUndo} title="Desfazer (Ctrl+Z)" aria-label="Desfazer">
           ⟲
@@ -235,16 +299,21 @@ export function Progression() {
           const inScale = !ctx || chordFits(c.root, c.quality, ctx.pcSet);
           const chromatic = ctx && !inScale ? chromaticFunction(ctx, c.root, c.quality) : null;
           const roman = ctx ? chromatic?.label ?? romanFor(ctx, c.root, c.quality) : "";
+          const shown = live?.id === c.id ? live.beats : c.duration;
+          const crosses = barLinesWithin(start, shown, meter).length > 0;
+          const inRegion = !!region && i >= region.from && i <= region.to;
+          const lost = dropped.get(c.id) ?? 0;
           const playing = isPlayingBlock && playhead?.chordIndex === i && playhead.itemIndex === selectedItem;
           return (
             <div
               key={c.id}
               role="listitem"
               ref={playing ? keepVisible : undefined}
-              className={`chord-card ${c.id === selectedChord ? "selected" : ""} ${playing ? "playing" : ""} ${!inScale ? (chromatic ? "chromatic" : "out") : ""} ${dragFrom === i ? "dragging" : ""}`}
-              style={{ flexGrow: c.duration, minWidth: `${Math.max(88, c.duration * 26)}px` }}
-              draggable
-              onDragStart={() => setDragFrom(i)}
+              className={`chord-card ${c.id === selectedChord ? "selected" : ""} ${playing ? "playing" : ""} ${!inScale ? (chromatic ? "chromatic" : "out") : ""} ${dragFrom === i ? "dragging" : ""} ${inRegion ? "in-region" : ""} ${crosses ? "crosses-bar" : ""}`}
+              style={{ flexGrow: shown, minWidth: `${Math.max(88, shown * 26)}px` }}
+              title="Shift+clique estende a seleção (região)"
+              draggable={!live}
+              onDragStart={() => !live && setDragFrom(i)}
               onDragEnd={() => setDragFrom(null)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
@@ -252,7 +321,11 @@ export function Progression() {
                 if (dragFrom !== null) actions.moveChord(dragFrom, i);
                 setDragFrom(null);
               }}
-              onClick={() => {
+              onClick={(e) => {
+                if (e.shiftKey && useStore.getState().selectedChord) {
+                  actions.setRegionEnd(c.id);
+                  return;
+                }
                 actions.selectChord(c.id);
                 previewChord(c);
               }}
@@ -260,7 +333,7 @@ export function Progression() {
               onKeyDown={(e) => {
                 if (e.key === "Delete" || e.key === "Backspace") actions.removeChord(c.id);
               }}
-              aria-label={`${chordSymbol(c, spell)}, ${roman}, ${c.duration} tempos`}
+              aria-label={`${chordSymbol(c, spell)}, ${roman}, ${shown} tempos`}
             >
               <div className="chord-top">
                 <span className="chord-symbol">{chordSymbol(c, spell)}</span>
@@ -274,16 +347,25 @@ export function Progression() {
                       ⚠
                     </span>
                   ))}
+                {lost > 0 && (
+                  <span
+                    className="range-warn"
+                    title={`${lost} nota${lost > 1 ? "s" : ""} fora da tessitura de ${instrumentName}: omitida${lost > 1 ? "s" : ""} na reprodução`}
+                    aria-label={`${lost} nota${lost > 1 ? "s" : ""} fora da tessitura de ${instrumentName}: omitida${lost > 1 ? "s" : ""} na reprodução`}
+                  >
+                    ⚠
+                  </span>
+                )}
               </div>
               <div className="chord-roman">{roman}</div>
               <div className="chord-bottom" onClick={(e) => e.stopPropagation()}>
-                <button className="icon-btn tiny" onClick={() => actions.setDuration(c.id, stepDuration(c.duration, -1))} aria-label="Diminuir duração">
+                <button className="icon-btn tiny" onClick={() => actions.setDuration(c.id, stepDuration(c.duration, -1, unit))} aria-label="Diminuir duração">
                   −
                 </button>
                 <span className="mono" title="Duração em tempos">
-                  {c.duration}
+                  {shown}
                 </span>
-                <button className="icon-btn tiny" onClick={() => actions.setDuration(c.id, stepDuration(c.duration, 1))} aria-label="Aumentar duração">
+                <button className="icon-btn tiny" onClick={() => actions.setDuration(c.id, stepDuration(c.duration, 1, unit))} aria-label="Aumentar duração">
                   +
                 </button>
                 <span className="spacer" />
@@ -294,7 +376,14 @@ export function Progression() {
                   ✕
                 </button>
               </div>
-              <div className="chord-pos mono">{formatPosition(start, meter)}</div>
+              <Ruler start={start} duration={shown} meter={meter} />
+              <ResizeHandle
+                label={chordSymbol(c, spell)}
+                duration={c.duration}
+                unit={unit}
+                onLive={(beats) => setLive(beats === null ? null : { id: c.id, beats })}
+                onCommit={(beats) => actions.setDuration(c.id, beats)}
+              />
             </div>
           );
         })}

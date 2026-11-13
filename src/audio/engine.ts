@@ -7,7 +7,7 @@ import { fitToRange } from "../core/voicing";
 import { CacheStorage, ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
 import { getInstrumentDef, type InstrumentDef, type SmplrSource, type SynthPreset } from "./instruments";
 import { midiActive, midiChannel, midiMutesBrowser, noteOff, noteOn, panic, toMidiTime } from "./midi";
-import { countIn, renderNotes, strike, strumFor } from "./render";
+import { countIn, metronomeClicks, renderNotes, strike, strumFor } from "./render";
 
 type Voice = {
   triggerAttackRelease: (notes: string[], duration: number, time?: number, velocity?: number) => unknown;
@@ -237,10 +237,10 @@ function sampleStorage() {
   return storage;
 }
 
-function createSmplr(src: SmplrSource): SmplrInstrument {
+function createSmplr(src: SmplrSource, onLoadProgress: (p: { loaded: number; total: number }) => void): SmplrInstrument {
   // Mesmo AudioContext do Tone: os tempos do Transport valem para o smplr.
   const ctx = Tone.getContext().rawContext as unknown as AudioContext;
-  const common = { destination: sink(), storage: sampleStorage() };
+  const common = { destination: sink(), storage: sampleStorage(), onLoadProgress };
   switch (src.kind) {
     case "grand-piano":
       return SplendidGrandPiano(ctx, { ...common, decayTime: 0.6 });
@@ -283,6 +283,31 @@ export function instrumentStatus(id: string): LoadStatus {
   return loaded.get(id)?.status ?? "idle";
 }
 
+// Progresso (0–1) do download dos samples do smplr, por instrumento.
+const progress = new Map<string, number>();
+const lastProgressNotify = new Map<string, number>();
+const PROGRESS_INTERVAL_MS = 100;
+
+/** Progresso de carregamento (0–1); null quando desconhecido (synth, plano B, pronto ou erro). */
+export function instrumentProgress(id: string): number | null {
+  return progress.get(id) ?? null;
+}
+
+function clearProgress(id: string) {
+  progress.delete(id);
+  lastProgressNotify.delete(id);
+}
+
+function reportProgress(id: string, p: { loaded: number; total: number }) {
+  if (!p.total || loaded.get(id)?.status !== "loading") return;
+  const value = Math.max(0, Math.min(1, p.loaded / p.total));
+  progress.set(id, value);
+  const now = Date.now();
+  if (value < 1 && now - (lastProgressNotify.get(id) ?? 0) < PROGRESS_INTERVAL_MS) return;
+  lastProgressNotify.set(id, now);
+  notifyStatus();
+}
+
 let fallbackVoice: Voice | null = null;
 const fallback = () => (fallbackVoice ??= createSynth("poly"));
 
@@ -300,17 +325,25 @@ function ensureInstrument(id: string): Loaded {
   loaded.set(id, entry);
   notifyStatus();
 
-  const fallBackToGm = () => (def.source.gm ? loadGmSampler(def, entry) : ((entry.status = "error"), notifyStatus()));
+  const fallBackToGm = () => {
+    clearProgress(id);
+    if (def.source.gm) loadGmSampler(def, entry);
+    else {
+      entry.status = "error";
+      notifyStatus();
+    }
+  };
   if (!def.source.smplr) {
     fallBackToGm();
     return entry;
   }
   try {
-    const inst = createSmplr(def.source.smplr);
+    const inst = createSmplr(def.source.smplr, (p) => reportProgress(id, p));
     inst.ready.then(
       () => {
         entry.voice = smplrVoice(inst);
         entry.status = "ready";
+        clearProgress(id);
         notifyStatus();
       },
       (err: unknown) => {
@@ -411,26 +444,16 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
     }
   }
 
-  // Playhead e metrônomo, por acorde.
-  let blockKey = "";
-  let beatInBlock = 0;
+  // Playhead por acorde (o swing não desloca o ataque do acorde, só subdivisões internas).
   events.forEach((ev, index) => {
     transport.schedule((time) => draw.schedule(() => opts.onEvent(index), time), offset + ev.startSec);
-    const key = `${ev.itemIndex}:${ev.repetition}`;
-    if (key !== blockKey) {
-      blockKey = key;
-      beatInBlock = 0;
-    }
-    const firstBeat = beatInBlock;
-    beatInBlock += ev.beats;
-    if (opts.metronome) {
-      const spb = 60 / ev.bpm;
-      for (let b = 0; b < ev.beats; b++) {
-        const accent = (firstBeat + b) % ev.meter[0] === 0;
-        transport.schedule((time) => void metronomeVoice().triggerAttackRelease(accent ? 1760 : 1100, 0.03, time), offset + ev.startSec + b * spb);
-      }
-    }
   });
+
+  if (opts.metronome) {
+    for (const c of metronomeClicks(expanded)) {
+      transport.schedule((time) => void metronomeVoice().triggerAttackRelease(c.accent ? 1760 : 1100, 0.03, time), offset + c.time);
+    }
+  }
 
   // Saída MIDI: notas sem ajuste de tessitura (o plugin decide o timbre). Cada evento
   // passa pelo Transport, então parar cancela o que ainda não saiu.

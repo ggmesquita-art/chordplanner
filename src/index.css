@@ -1184,3 +1184,191 @@ section {
   padding-left: 18px;
   margin: 6px 0 0;
 }
+
+/* ——— Roda: lista por graus, hover, movimento reduzido ——— */
+@media (prefers-reduced-motion: reduce) {
+  .slice path {
+    transition: none;
+  }
+  .slice.playing path {
+    animation: none;
+    stroke: var(--text);
+    stroke-width: 4;
+    stroke-dasharray: 6 3;
+  }
+  .badge,
+  .badge circle,
+  .radial-menu,
+  .radial-menu button {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ——— Modificadores (conflitos, gaveta) e arranjo (cor, compassos) ——— */
+.mod.conflict {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.mod-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mod-bar h2 {
+  margin: 0;
+}
+.drawer-toggle {
+  display: none;
+}
+.color-swatches {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--sw);
+  cursor: pointer;
+}
+.swatch[aria-checked="true"] {
+  border-color: var(--text, #fff);
+}
+.bar-ticks {
+  position: relative;
+  height: 12px;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.bar-ticks span {
+  position: absolute;
+  top: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 2px;
+  line-height: 12px;
+}
+@media (max-width: 900px) {
+  .app {
+    padding-bottom: 64px;
+  }
+  .drawer-toggle {
+    display: inline-flex;
+  }
+  .modifiers {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    border-radius: 12px 12px 0 0;
+    max-height: 70vh;
+    overflow-y: auto;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+  }
+  .modifiers:not(.open) {
+    overflow: hidden;
+  }
+  .modifiers:not(.open) > :not(.mod-bar) {
+    display: none;
+  }
+}
+
+/* ——— Progressão: grade, redimensionar, régua ——— */
+.chord-card.in-region {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel-2));
+  outline: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -3px;
+}
+.region-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+}
+.range-warn {
+  color: var(--tension);
+  font-size: 11px;
+  cursor: help;
+}
+.chord-resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+  border-radius: 4px;
+}
+.chord-resize:hover,
+.chord-resize:focus-visible {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: none;
+}
+.chord-ruler {
+  position: relative;
+  height: 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  pointer-events: none;
+}
+.chord-ruler .tick {
+  position: absolute;
+  top: 0;
+  height: 4px;
+  border-left: 1px solid var(--muted);
+  opacity: 0.6;
+}
+.chord-ruler .tick.bar {
+  height: 10px;
+  border-left-width: 2px;
+  opacity: 1;
+}
+.chord-ruler .bar-num {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  font-size: 9px;
+  line-height: 10px;
+  color: var(--muted);
+}
+.chord-ruler .tie {
+  position: absolute;
+  top: -14px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--tension);
+  pointer-events: auto;
+}
+.chord-card.crosses-bar {
+  border-top-color: color-mix(in srgb, var(--tension) 45%, var(--line));
+}
+
+/* ——— Telas estreitas: nada estoura a largura da página ——— */
+@media (max-width: 900px) {
+  .section-head {
+    flex-wrap: wrap;
+  }
+  .section-head .field {
+    min-width: 0;
+  }
+  .section-head .field select {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

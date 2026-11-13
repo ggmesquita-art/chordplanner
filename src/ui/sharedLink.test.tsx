@@ -9,6 +9,7 @@ vi.mock("../audio/engine", () => ({
   preload: vi.fn(),
   subscribeStatus: () => () => {},
   instrumentStatus: () => "ready",
+  instrumentProgress: () => null,
 }));
 
 import { encodeShare } from "../export/url";

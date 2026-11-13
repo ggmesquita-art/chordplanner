@@ -4,7 +4,7 @@ import { makeChord } from "../core/chords";
 import { expandArrangement, makeBlock, makeSong } from "../core/song";
 import { songToMidi } from "../export/midi";
 import { configureMidi, DEFAULT_MIDI, initMidi, midiActive, noteOff, noteOn, panic } from "./midi";
-import { countIn, renderNotes } from "./render";
+import { countIn, metronomeClicks, renderNotes } from "./render";
 
 function song2() {
   const song = makeSong();
@@ -101,12 +101,69 @@ describe("countIn", () => {
     expect(ci.clicks.map((c) => c.accent)).toEqual([true, false, false, false]);
   });
 
-  it("6/8: 6 cliques; sem eventos: vazio", () => {
+  it("6/8: 2 cliques (um por pulso), seconds = 6 tempos; sem eventos: vazio", () => {
     const song = song2();
     song.arrangement.shift();
     const ci = countIn(expandArrangement(song));
-    expect(ci.clicks.length).toBe(6);
+    expect(ci.clicks.length).toBe(2);
+    expect(ci.clicks.map((c) => c.accent)).toEqual([true, false]);
+    expect(ci.seconds).toBeCloseTo(6 * (60 / 120));
+    expect(ci.clicks[1].time).toBeCloseTo(3 * (60 / 120));
     expect(countIn(expandArrangement(makeSong()))).toEqual({ seconds: 0, clicks: [] });
+  });
+
+  it("12/8: 4 cliques", () => {
+    const song = makeSong();
+    song.meter = [12, 8];
+    song.blocks[song.arrangement[0].blockId].chords = [makeChord(0, "maj", 12)];
+    expect(countIn(expandArrangement(song)).clicks.length).toBe(4);
+  });
+});
+
+describe("metronomeClicks", () => {
+  const build = (meter: [number, number], durations: number[], repeat = 1) => {
+    const song = makeSong();
+    song.meter = meter;
+    song.bpm = 60;
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.chords = durations.map((d) => makeChord(0, "maj", d));
+    song.arrangement[0].repeat = repeat;
+    return metronomeClicks(expandArrangement(song));
+  };
+
+  it("4/4: um clique por tempo, acento a cada 4", () => {
+    const c = build([4, 4], [4, 4]);
+    expect(c.length).toBe(8);
+    expect(c.map((x) => x.accent)).toEqual([true, false, false, false, true, false, false, false]);
+    expect(c.map((x) => x.time)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("6/8: 2 cliques por compasso, acento no primeiro", () => {
+    const c = build([6, 8], [6, 6]);
+    expect(c.map((x) => x.time)).toEqual([0, 3, 6, 9]);
+    expect(c.map((x) => x.accent)).toEqual([true, false, true, false]);
+  });
+
+  it("12/8: 4 cliques por compasso", () => {
+    const c = build([12, 8], [12]);
+    expect(c.length).toBe(4);
+    expect(c.map((x) => x.accent)).toEqual([true, false, false, false]);
+  });
+
+  it("7/8: 7 cliques por compasso", () => {
+    const c = build([7, 8], [7]);
+    expect(c.length).toBe(7);
+    expect(c.filter((x) => x.accent).length).toBe(1);
+  });
+
+  it("acorde que atravessa a barra mantém o acento no lugar certo", () => {
+    const c = build([4, 4], [3, 3, 2]);
+    expect(c.map((x) => x.accent)).toEqual([true, false, false, false, true, false, false, false]);
+  });
+
+  it("reinicia a contagem a cada repetição do bloco", () => {
+    const c = build([4, 4], [2], 2);
+    expect(c.map((x) => x.accent)).toEqual([true, false, true, false]);
   });
 });
 

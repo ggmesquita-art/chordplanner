@@ -36,6 +36,10 @@ export default function App() {
   useSessionGuard();
   const soundOnClick = useStore((s) => s.soundOnClick);
   const setSoundOnClick = useStore((s) => s.setSoundOnClick);
+  const soundOnHover = useStore((s) => s.soundOnHover);
+  const setSoundOnHover = useStore((s) => s.setSoundOnHover);
+  const showDegrees = useStore((s) => s.showDegrees);
+  const setShowDegrees = useStore((s) => s.setShowDegrees);
 
   return (
     <div className="app">
@@ -51,9 +55,17 @@ export default function App() {
               <input type="checkbox" checked={soundOnClick} onChange={(e) => setSoundOnClick(e.target.checked)} />
               Som ao clicar
             </label>
+            <label className="check small">
+              <input type="checkbox" checked={soundOnHover} onChange={(e) => setSoundOnHover(e.target.checked)} />
+              Som ao passar o mouse
+            </label>
+            <label className="check small">
+              <input type="checkbox" checked={showDegrees} onChange={(e) => setShowDegrees(e.target.checked)} />
+              Lista por graus
+            </label>
           </div>
           <ChordWheel />
-          <DegreeStrip />
+          {showDegrees && <DegreeStrip />}
         </section>
         <ModifierPanel />
       </main>

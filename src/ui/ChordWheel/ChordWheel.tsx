@@ -6,6 +6,7 @@ import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
 import { useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
+import { sharedPitchClasses } from "./shared";
 
 const SIZE = 560;
 const C = SIZE / 2;
@@ -17,6 +18,8 @@ const RINGS: { quality: QualityId; r0: number; r1: number; offset: number; label
 const EXTRA_QUALITIES: QualityId[] = ["aug", "sus4", "sus2", "5"];
 
 type SliceState = "explore" | "diatonic" | "chromatic" | "other" | "out";
+
+const HOVER_DELAY = 250;
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const pt = (r: number, deg: number): [number, number] => [C + r * Math.sin(rad(deg)), C - r * Math.cos(rad(deg))];
@@ -33,7 +36,13 @@ function sector(r0: number, r1: number, a0: number, a1: number): string {
 function useRotation(target: number): number {
   const [angle, setAngle] = useState(target);
   const current = useRef(target);
+  // Movimento reduzido: sem animação, o ângulo é sempre o alvo.
+  const reduced = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   useEffect(() => {
+    if (reduced) {
+      current.current = target;
+      return;
+    }
     let to = target;
     while (to - current.current > 180) to -= 360;
     while (to - current.current < -180) to += 360;
@@ -50,8 +59,8 @@ function useRotation(target: number): number {
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [target]);
-  return angle;
+  }, [target, reduced]);
+  return reduced ? target : angle;
 }
 
 export function ChordWheel() {
@@ -68,6 +77,64 @@ export function ChordWheel() {
   const [hover, setHover] = useState<{ root: PitchClass; quality: QualityId } | null>(null);
   const [menu, setMenu] = useState<{ root: PitchClass; x: number; y: number; qualities: QualityId[] } | null>(null);
   const refs = useRef(new Map<string, SVGGElement>());
+  const badgeRefs = useRef(new Map<number, SVGGElement>());
+  const menuRef = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverPlayed = useRef<string | null>(null);
+
+  const clearHoverTimer = () => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+  useEffect(() => clearHoverTimer, []);
+
+  // Menu radial: foco no primeiro item ao abrir; Esc e clique fora fecham.
+  const menuRoot = menu?.root;
+  useEffect(() => {
+    if (menuRoot === undefined) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || badgeRefs.current.get(menuRoot)?.contains(t)) return;
+      setMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenu(null);
+      badgeRefs.current.get(menuRoot)?.focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuRoot]);
+
+  const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!dir) return;
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[(i + dir + items.length) % items.length]?.focus();
+    e.preventDefault();
+  };
+
+  const onSliceEnter = (e: React.PointerEvent, key: string, root: PitchClass, quality: QualityId, can: boolean) => {
+    clearHoverTimer();
+    const { soundOnHover } = useStore.getState();
+    if (!soundOnHover || !can || e.pointerType !== "mouse" || hoverPlayed.current === key) return;
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = null;
+      if (!useStore.getState().soundOnHover || useStore.getState().playing) return;
+      hoverPlayed.current = key;
+      previewChord(makeChord(root, quality));
+    }, HOVER_DELAY);
+  };
+  const onSliceLeave = () => {
+    clearHoverTimer();
+    hoverPlayed.current = null;
+  };
 
   const rotation = useRotation(tonic === null ? 0 : -fifthsPosition(tonic) * 30);
 
@@ -132,11 +199,7 @@ export function ChordWheel() {
     };
   }, [hover, previous, spell, ctx]);
 
-  const sharedPcs = useMemo(() => {
-    if (!hover || !previous) return new Set<number>();
-    const prev = new Set(chordIntervals(previous).map((i) => mod12(previous.root + i)));
-    return new Set(getQuality(hover.quality).intervals.map((i) => mod12(hover.root + i)).filter((pc) => prev.has(pc)));
-  }, [hover, previous]);
+  const sharedPcs = useMemo(() => sharedPitchClasses(hover, previous), [hover, previous]);
 
   return (
     <div className="wheel-wrap">
@@ -170,6 +233,8 @@ export function ChordWheel() {
                 onKeyDown={(e) => onKey(e, ri, pos, root, ring.quality)}
                 onMouseEnter={() => setHover({ root, quality: ring.quality })}
                 onMouseLeave={() => setHover(null)}
+                onPointerEnter={(e) => onSliceEnter(e, `${ri}-${pos}`, root, ring.quality, can)}
+                onPointerLeave={onSliceLeave}
                 onFocus={() => setHover({ root, quality: ring.quality })}
                 onBlur={() => setHover(null)}
               >
@@ -188,7 +253,7 @@ export function ChordWheel() {
                     {roman}
                   </text>
                 )}
-                {hover && sharedPcs.size > 0 && ri === 0 && sharedPcs.has(majorRoot) && (
+                {hover && sharedPcs.size > 0 && sharedPcs.has(majorRoot) && (
                   <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
                 )}
               </g>
@@ -206,6 +271,7 @@ export function ChordWheel() {
           return (
             <g
               key={`badge-${deg.root}`}
+              ref={(el) => void (el ? badgeRefs.current.set(deg.root, el) : badgeRefs.current.delete(deg.root))}
               className="badge"
               role="button"
               tabIndex={0}
@@ -249,7 +315,7 @@ export function ChordWheel() {
       </svg>
 
       {menu && (
-        <div className="radial-menu" style={{ left: `${menu.x * 100}%`, top: `${menu.y * 100}%` }} role="menu">
+        <div className="radial-menu" ref={menuRef} onKeyDown={onMenuKey} style={{ left: `${menu.x * 100}%`, top: `${menu.y * 100}%` }} role="menu">
           {menu.qualities.map((q) => (
             <button key={q} role="menuitem" onClick={() => activate(menu.root, q)}>
               {chordSymbol(makeChord(menu.root, q), spell)}

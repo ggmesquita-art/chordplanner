@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeChord, type Chord } from "./chords";
 import { chromaticFunction, scaleContext, romanFor } from "./diatonic";
-import { chordIntervals, chordSymbol, inversionBass, modifierStatus, resolveChord, toggleModifier, type Modifier } from "./modifiers";
+import { conflictingModifier, chordIntervals, chordSymbol, inversionBass, modifierStatus, resolveChord, toggleModifier, type Modifier } from "./modifiers";
 import { makeSpeller, mod12, pcName, spellScale } from "./pitch";
 import { SCALES, getScale, pitchSet, scaleFormula, searchScales } from "./scales";
 import { expandArrangement, makeBlock, makeSong } from "./song";
@@ -273,5 +273,23 @@ describe("tempo e arranjo (§3.8)", () => {
     ];
     song.arrangement[0].repeat = 2;
     expect(songToText(song, sharpSpell)).toBe("[Verso A ×2]  4/4 ♩=90\n| Dm7 | G7 | Cmaj7 | % |");
+  });
+});
+
+describe("conflictingModifier", () => {
+  const b9: Modifier = { kind: "alt", value: "b9" };
+  const ext9: Modifier = { kind: "ext", value: 9 };
+  const ext7: Modifier = { kind: "ext", value: 7 };
+  it("devolve o ativo que conflita", () => {
+    expect(conflictingModifier([{ kind: "ext", value: 11 }], ext9)).toEqual({ kind: "ext", value: 11 });
+  });
+  it("♭5 ativo e ♯5 → devolve ♭5", () => {
+    expect(conflictingModifier([{ kind: "alt", value: "b5" }], { kind: "alt", value: "#5" })).toEqual({ kind: "alt", value: "b5" });
+  });
+  it("opção já ativa → null", () => {
+    expect(conflictingModifier([ext9], ext9)).toBeNull();
+  });
+  it("sem conflito → null", () => {
+    expect(conflictingModifier([b9], ext7)).toBeNull();
   });
 });

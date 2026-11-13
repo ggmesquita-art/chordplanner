@@ -59,6 +59,12 @@ export function toggleModifier(mods: Modifier[], m: Modifier): Modifier[] {
   return [...mods.filter((x) => !conflictsWith(m, x)), m];
 }
 
+/** Primeiro modificador ativo que conflita com `m`; null se `m` já está ativo (pode desligar) ou não há conflito. */
+export function conflictingModifier(mods: Modifier[], m: Modifier): Modifier | null {
+  if (hasModifier(mods, m)) return null;
+  return mods.find((x) => conflictsWith(m, x)) ?? null;
+}
+
 const find = <K extends Modifier["kind"]>(mods: Modifier[], kind: K) =>
   mods.filter((m): m is Extract<Modifier, { kind: K }> => m.kind === kind).map((m) => m.value);
 

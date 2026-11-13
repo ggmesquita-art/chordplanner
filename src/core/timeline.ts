@@ -41,10 +41,30 @@ export function swingOffset(swing: number, eighthIndex: number): number {
   return eighthIndex % 2 === 1 ? (swing / 100) * (1 / 6) : 0;
 }
 
-export const DURATION_STEPS = [0.5, 1, 2, 3, 4, 6, 8, 12, 16];
-
 /** Grade de edição (DESIGN §3.8): unidade em que as durações são ajustadas. */
 export type Grid = 0.5 | 1 | 2 | 4 | "bar";
 export const GRIDS: Grid[] = [0.5, 1, 2, 4, "bar"];
 /** Tamanho da grade em tempos, na fórmula de compasso dada. */
 export const gridBeats = (grid: Grid, [beatsPerBar]: Meter) => (grid === "bar" ? beatsPerBar : grid);
+
+const MAX_DURATION = 64;
+const EPS = 1e-9;
+
+/** Próxima duração ao ajustar pela grade (±1). Nunca zera; nunca passa de 64 tempos. */
+export function stepDuration(duration: number, dir: 1 | -1, unit: number): number {
+  if (dir > 0) return Math.min(MAX_DURATION, (Math.floor(duration / unit + EPS) + 1) * unit);
+  const below = (Math.ceil(duration / unit - EPS) - 1) * unit;
+  return Math.max(below, Math.min(duration, unit));
+}
+
+/** Arredonda ao múltiplo mais próximo da grade (mínimo uma unidade, teto 64). */
+export function snapDuration(beats: number, unit: number): number {
+  return Math.min(MAX_DURATION, Math.max(unit, Math.round(beats / unit) * unit));
+}
+
+/** Deslocamentos (em tempos, desde o início do acorde) das barras de compasso estritamente dentro dele. */
+export function barLinesWithin(startBeat: number, duration: number, [beatsPerBar]: Meter): number[] {
+  const lines: number[] = [];
+  for (let b = (Math.floor(startBeat / beatsPerBar + EPS) + 1) * beatsPerBar; b < startBeat + duration - EPS; b += beatsPerBar) lines.push(b - startBeat);
+  return lines;
+}
