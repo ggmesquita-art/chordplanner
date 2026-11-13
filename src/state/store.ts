@@ -9,13 +9,15 @@ import { mod12, type AccidentalPref, type PitchClass } from "../core/pitch";
 import { getScale } from "../core/scales";
 import { makeBlock, makeSong, newId, type Block, type PlaybackPattern, type Song } from "../core/song";
 import { buildTemplate, type TemplateId } from "../core/templates";
-import type { Meter } from "../core/timeline";
+import type { Grid, Meter } from "../core/timeline";
 import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
 import { sanitizeContent, type SongContent } from "../export/json";
 import { repository, type RestrictionMode, type SavedSongMeta, type Session } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
+
+export type PlayScope = "song" | "block" | "region";
 
 export const UNTITLED = "Sem título";
 
@@ -49,8 +51,14 @@ export function normalizeHash(hash: string | null): string | null {
 /** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
 type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
-type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi"> & {
+type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover"> & {
   midi: MidiSettings;
+  countIn: boolean;
+  grid: Grid;
+  showDegrees: boolean;
+  soundOnHover: boolean;
+  /** Outra ponta da região selecionada (id de acorde do bloco atual); a primeira é `selectedChord`. */
+  regionEnd: string | null;
   songId: string | null;
   songName: string;
   savedHash: string | null;
@@ -61,7 +69,7 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   future: Snapshot[];
   playing: boolean;
   loop: boolean;
-  playScope: "song" | "block";
+  playScope: PlayScope;
   playhead: Playhead;
   /** Durante a reprodução, a progressão acompanha o bloco que está tocando. */
   followPlayback: boolean;
@@ -79,8 +87,13 @@ type Actions = {
   setMetronome: (v: boolean) => void;
   setFollowScale: (v: boolean) => void;
   setCountIn: (v: boolean) => void;
+  setGrid: (g: Grid) => void;
+  setShowDegrees: (v: boolean) => void;
+  setSoundOnHover: (v: boolean) => void;
+  /** Estende a seleção até este acorde do bloco atual (null desfaz a região). */
+  setRegionEnd: (id: string | null) => void;
   setLoop: (v: boolean) => void;
-  setPlayScope: (s: "song" | "block") => void;
+  setPlayScope: (s: PlayScope) => void;
   setPlaying: (p: boolean) => void;
   setPlayhead: (p: Playhead) => void;
   setFollowPlayback: (v: boolean) => void;
@@ -107,7 +120,7 @@ type Actions = {
   moveItem: (from: number, to: number) => void;
   setRepeat: (i: number, n: number) => void;
   renameBlock: (blockId: string, name: string) => void;
-  setBlockProps: (blockId: string, patch: Partial<Pick<Block, "bpm" | "meter" | "pattern" | "instrument" | "midiChannel">>) => void;
+  setBlockProps: (blockId: string, patch: Partial<Pick<Block, "bpm" | "meter" | "pattern" | "instrument" | "midiChannel" | "color">>) => void;
   applyTemplate: (id: TemplateId) => void;
 
   setBpm: (bpm: number) => void;
@@ -149,10 +162,14 @@ function initialState(): State {
     countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, ...rest } = base;
+  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, ...rest } = base;
   return {
     ...rest,
     countIn,
+    grid,
+    showDegrees,
+    soundOnHover,
+    regionEnd: null,
     // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
     midi: { ...DEFAULT_MIDI, ...midi, enabled: false },
     songId,
@@ -185,6 +202,15 @@ export const selectBlock = (s: Pick<State, "song" | "selectedItem">): Block | nu
 export const selectChord = (s: State): Chord | null =>
   selectBlock(s)?.chords.find((c) => c.id === s.selectedChord) ?? null;
 
+/** Região selecionada no bloco atual: índices (inclusivos, em ordem) dos acordes, ou null se não houver. */
+export function selectRegion(s: Pick<State, "song" | "selectedItem" | "selectedChord" | "regionEnd">): { from: number; to: number } | null {
+  const chords = selectBlock(s)?.chords;
+  if (!chords || s.selectedChord === null || s.regionEnd === null) return null;
+  const a = chords.findIndex((c) => c.id === s.selectedChord);
+  const b = chords.findIndex((c) => c.id === s.regionEnd);
+  return a < 0 || b < 0 || a === b ? null : { from: Math.min(a, b), to: Math.max(a, b) };
+}
+
 // ——— Helpers ————————————————————————————————————————————————————————
 
 function tonicChordFor(s: Pick<State, "tonic" | "scaleId" | "song">, block: Block): Chord | null {
@@ -198,11 +224,11 @@ function cloneBlock(b: Block, name: string): Block {
 }
 
 /** Ajusta a seleção ao restaurar uma música: bloco existente e acorde ainda presente. */
-function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord"> {
+function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord" | "regionEnd"> {
   const selectedItem = Math.max(0, Math.min(s.selectedItem, song.arrangement.length - 1));
   const block = selectBlock({ song, selectedItem });
   const keep = s.selectedChord !== null && !!block?.chords.some((c) => c.id === s.selectedChord);
-  return { selectedItem, selectedChord: keep ? s.selectedChord : null };
+  return { selectedItem, selectedChord: keep ? s.selectedChord : null, regionEnd: null };
 }
 
 export const useStore = create<Store>()((set, get) => {
@@ -212,7 +238,8 @@ export const useStore = create<Store>()((set, get) => {
     const next = structuredClone(s.song);
     fn(next, s);
     const prev: Snapshot = { song: s.song, tonic: s.tonic, scaleId: s.scaleId };
-    set({ song: next, past: [...s.past, prev].slice(-HISTORY_LIMIT), future: [], ...extra });
+    // Uma edição que muda o acorde selecionado desfaz a região (ela parte da seleção).
+    set({ song: next, past: [...s.past, prev].slice(-HISTORY_LIMIT), future: [], ...extra, ...("selectedChord" in extra ? { regionEnd: null } : {}) });
   };
 
   const currentBlock = (song: Song, s: State): Block | null => {
@@ -277,6 +304,10 @@ export const useStore = create<Store>()((set, get) => {
     setMetronome: (metronome) => set({ metronome }),
     setFollowScale: (followScale) => set({ followScale }),
     setCountIn: (countIn) => set({ countIn }),
+    setGrid: (grid) => set({ grid }),
+    setShowDegrees: (showDegrees) => set({ showDegrees }),
+    setSoundOnHover: (soundOnHover) => set({ soundOnHover }),
+    setRegionEnd: (regionEnd) => set({ regionEnd }),
     setLoop: (loop) => set({ loop }),
     setPlayScope: (playScope) => set({ playScope }),
     setPlaying: (playing) => set(playing ? { playing } : { playing, playhead: null }),
@@ -286,7 +317,7 @@ export const useStore = create<Store>()((set, get) => {
       // Muda o bloco exibido; mantém a seleção só se o acorde existir no novo bloco.
       const item = s.song.arrangement[playhead.itemIndex];
       const keep = item && s.song.blocks[item.blockId]?.chords.some((c) => c.id === s.selectedChord);
-      set({ playhead, selectedItem: playhead.itemIndex, selectedChord: keep ? s.selectedChord : null });
+      set({ playhead, selectedItem: playhead.itemIndex, selectedChord: keep ? s.selectedChord : null, regionEnd: null });
     },
     setFollowPlayback: (followPlayback) => set({ followPlayback }),
     setMidi: (patch) => set({ midi: { ...get().midi, ...patch } }),
@@ -307,7 +338,7 @@ export const useStore = create<Store>()((set, get) => {
       return chord;
     },
 
-    selectChord: (selectedChord) => set({ selectedChord }),
+    selectChord: (selectedChord) => set({ selectedChord, regionEnd: null }),
 
     removeChord: (id) =>
       commit(
@@ -398,7 +429,7 @@ export const useStore = create<Store>()((set, get) => {
         }
       }),
 
-    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null }),
+    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null, regionEnd: null }),
 
     addBlock: () => {
       const s = get();
@@ -467,6 +498,7 @@ export const useStore = create<Store>()((set, get) => {
             const [lo, hi] = k === "bpm" ? [30, 300] : [1, 16];
             value = typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : undefined;
           }
+          if (k === "color") value = typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : b.color;
           if (value === undefined) delete b[k];
           else Object.assign(b, { [k]: value });
         }
@@ -529,6 +561,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: contentHash(fresh),
         selectedItem: 0,
         selectedChord: null,
+        regionEnd: null,
         past: [],
         future: [],
         playhead: null,
@@ -547,6 +580,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: contentHash(stored),
         selectedItem: 0,
         selectedChord: null,
+        regionEnd: null,
         past: [],
         future: [],
         playhead: null,
@@ -566,6 +600,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: null,
         selectedItem: 0,
         selectedChord: null,
+        regionEnd: null,
         past: [],
         future: [],
         playhead: null,
@@ -620,6 +655,9 @@ function buildSession(s: State): Session {
     metronome: s.metronome,
     followScale: s.followScale,
     countIn: s.countIn,
+    grid: s.grid,
+    showDegrees: s.showDegrees,
+    soundOnHover: s.soundOnHover,
     midi: s.midi,
     song: s.song,
     songId: s.songId,

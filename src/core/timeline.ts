@@ -42,3 +42,9 @@ export function swingOffset(swing: number, eighthIndex: number): number {
 }
 
 export const DURATION_STEPS = [0.5, 1, 2, 3, 4, 6, 8, 12, 16];
+
+/** Grade de edição (DESIGN §3.8): unidade em que as durações são ajustadas. */
+export type Grid = 0.5 | 1 | 2 | 4 | "bar";
+export const GRIDS: Grid[] = [0.5, 1, 2, 4, "bar"];
+/** Tamanho da grade em tempos, na fórmula de compasso dada. */
+export const gridBeats = (grid: Grid, [beatsPerBar]: Meter) => (grid === "bar" ? beatsPerBar : grid);

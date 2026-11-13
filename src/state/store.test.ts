@@ -5,7 +5,7 @@ import { SCALES } from "../core/scales";
 import { makeSong } from "../core/song";
 import { sanitizeContent } from "../export/json";
 import { repository } from "./repository";
-import { contentHash, normalizeHash, selectBlock, selectDirty, useStore } from "./store";
+import { contentHash, normalizeHash, selectBlock, selectDirty, selectRegion, useStore } from "./store";
 
 describe("instrumentos (§5.2–5.3)", () => {
   it("ids únicos e tessituras válidas", () => {
@@ -236,5 +236,31 @@ describe("store", () => {
     expect(normalizeHash(legacy)).toBe(contentHash(content));
     expect(normalizeHash(null)).toBeNull();
     expect(normalizeHash("não é json")).toBe("não é json");
+  });
+
+  it("região: da seleção até outro acorde, em ordem; desfeita ao mudar a seleção", () => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+    st.addChord(5, "maj");
+    st.addChord(7, "maj");
+    const ids = selectBlock(useStore.getState())!.chords.map((c) => c.id);
+    expect(selectRegion(useStore.getState())).toBeNull();
+    useStore.getState().selectChord(ids[2]);
+    useStore.getState().setRegionEnd(ids[0]);
+    expect(selectRegion(useStore.getState())).toEqual({ from: 0, to: 2 });
+    useStore.getState().setRegionEnd(ids[2]);
+    expect(selectRegion(useStore.getState())).toBeNull();
+    useStore.getState().setRegionEnd(ids[1]);
+    useStore.getState().addChord(9, "m");
+    expect(useStore.getState().regionEnd).toBeNull();
+  });
+
+  it("cor do bloco só aceita hexadecimal", () => {
+    const id = selectBlock(useStore.getState())!.id;
+    useStore.getState().setBlockProps(id, { color: "#ff6b81" });
+    expect(selectBlock(useStore.getState())!.color).toBe("#ff6b81");
+    useStore.getState().setBlockProps(id, { color: "url(x)" });
+    expect(selectBlock(useStore.getState())!.color).toBe("#ff6b81");
   });
 });

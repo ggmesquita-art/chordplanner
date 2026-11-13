@@ -3,6 +3,7 @@
 
 import type { AccidentalPref } from "../core/pitch";
 import type { Song } from "../core/song";
+import { GRIDS, type Grid } from "../core/timeline";
 import type { MidiSettings } from "../audio/midi";
 import { SCALES } from "../core/scales";
 import { sanitizeContent } from "../export/json";
@@ -20,6 +21,12 @@ export type Session = {
   metronome: boolean;
   followScale: boolean;
   countIn?: boolean;
+  /** Grade de edição das durações (padrão: 1 tempo). */
+  grid?: Grid;
+  /** Mostrar a lista por graus abaixo da roda. */
+  showDegrees?: boolean;
+  /** Tocar o acorde ao pousar o mouse numa fatia da roda. */
+  soundOnHover?: boolean;
   midi?: MidiSettings;
   song: Song;
   /** Música salva associada à sessão (null = ainda não salva). */
@@ -114,6 +121,9 @@ export class LocalSongRepository implements SongRepository {
         metronome: bool(p.metronome, false),
         followScale: bool(p.followScale, false),
         countIn: bool(p.countIn, false),
+        grid: GRIDS.find((g) => g === p.grid) ?? 1,
+        showDegrees: bool(p.showDegrees, true),
+        soundOnHover: bool(p.soundOnHover, false),
         midi: typeof p.midi === "object" && p.midi !== null ? (p.midi as MidiSettings) : undefined,
         songId: typeof p.songId === "string" ? p.songId : null,
         songName: typeof p.songName === "string" ? p.songName : undefined,
