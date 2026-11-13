@@ -1,0 +1,149 @@
+import { useState } from "react";
+import { blockBeats, blockMeter, type Block } from "../../core/song";
+import { TEMPLATES, type TemplateId } from "../../core/templates";
+import { useStore } from "../../state/store";
+
+export function Arrangement() {
+  const song = useStore((s) => s.song);
+  const selected = useStore((s) => s.selectedItem);
+  const playhead = useStore((s) => s.playhead);
+  const { selectItem, addBlock, addLinkedInstance, makeUnique, removeItem, moveItem, setRepeat, renameBlock, applyTemplate } = useStore.getState();
+  const [editing, setEditing] = useState<number | null>(null);
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [confirmTemplate, setConfirmTemplate] = useState<TemplateId | null>(null);
+
+  const usage = new Map<string, number>();
+  for (const it of song.arrangement) usage.set(it.blockId, (usage.get(it.blockId) ?? 0) + 1);
+
+  const items = song.arrangement.reduce<{ item: (typeof song.arrangement)[number]; i: number; block: Block | undefined; bars: number; start: number }[]>((acc, item, i) => {
+    const block = song.blocks[item.blockId];
+    const bars = block ? (blockBeats(block) / blockMeter(song, block)[0]) * item.repeat : 0;
+    const prev = acc[i - 1];
+    return [...acc, { item, i, block, bars, start: prev ? prev.start + prev.bars : 1 }];
+  }, []);
+  const last = items[items.length - 1];
+  const bar = last ? last.start + last.bars : 1;
+
+  return (
+    <section className="arrangement" aria-label="Arranjo">
+      <div className="section-head">
+        <h2>Arranjo</h2>
+        <span className="muted small">{Math.round((bar - 1) * 100) / 100} compassos</span>
+        <div className="spacer" />
+        <label className="field small">
+          Template
+          <select
+            value=""
+            onChange={(e) => e.target.value && setConfirmTemplate(e.target.value as TemplateId)}
+            aria-label="Aplicar template de forma"
+          >
+            <option value="">—</option>
+            {TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {confirmTemplate && (
+          <span className="confirm small">
+            Substituir o arranjo atual?
+            <button className="btn danger" onClick={() => (applyTemplate(confirmTemplate), setConfirmTemplate(null))}>
+              Substituir
+            </button>
+            <button className="btn" onClick={() => setConfirmTemplate(null)}>
+              Cancelar
+            </button>
+          </span>
+        )}
+      </div>
+      <div className="lane" role="list">
+        {items.map(({ item, i, block, bars, start }) =>
+          block ? (
+            <div
+              key={item.id}
+              role="listitem"
+              className={`block-card ${i === selected ? "selected" : ""} ${playhead?.itemIndex === i ? "playing" : ""} ${dragFrom === i ? "dragging" : ""}`}
+              style={{ "--block": block.color, flexGrow: Math.max(1, bars), minWidth: `${Math.max(110, Math.min(260, bars * 34))}px` } as React.CSSProperties}
+              draggable
+              onDragStart={(e) => {
+                setDragFrom(i);
+                e.dataTransfer.effectAllowed = e.altKey ? "copy" : "move";
+              }}
+              onDragEnd={() => setDragFrom(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragFrom === null) return;
+                if (e.altKey) addLinkedInstance(dragFrom);
+                else moveItem(dragFrom, i);
+                setDragFrom(null);
+              }}
+              onClick={() => selectItem(i)}
+            >
+              <div className="block-top">
+                {editing === i ? (
+                  <input
+                    className="rename"
+                    autoFocus
+                    defaultValue={block.name}
+                    onBlur={(e) => (renameBlock(block.id, e.target.value.trim()), setEditing(null))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                ) : (
+                  <span className="block-name" onDoubleClick={() => setEditing(i)} title="Duplo clique para renomear">
+                    {block.name}
+                  </span>
+                )}
+                {(usage.get(block.id) ?? 0) > 1 && (
+                  <span className="linked" title="Bloco vinculado: editar muda todas as instâncias">
+                    🔗
+                  </span>
+                )}
+                <span className="repeat">×{item.repeat}</span>
+              </div>
+              <div className="block-meta small">
+                <span>|{Math.floor(start)}</span>
+                <span className="muted">
+                  {block.chords.length} ac. · {Math.round(bars * 100) / 100} comp.
+                </span>
+              </div>
+              {i === selected && (
+                <div className="block-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="icon-btn" onClick={() => setRepeat(i, item.repeat - 1)} aria-label="Menos repetições">
+                    −
+                  </button>
+                  <button className="icon-btn" onClick={() => setRepeat(i, item.repeat + 1)} aria-label="Mais repetições">
+                    +
+                  </button>
+                  <button className="icon-btn" onClick={() => addLinkedInstance(i)} title="Nova instância vinculada (Alt+arrastar)">
+                    🔗+
+                  </button>
+                  {(usage.get(block.id) ?? 0) > 1 && (
+                    <button className="icon-btn" onClick={() => makeUnique(i)} title="Tornar único (cópia independente)">
+                      ✂
+                    </button>
+                  )}
+                  <button className="icon-btn" onClick={() => setEditing(i)} title="Renomear">
+                    ✎
+                  </button>
+                  {song.arrangement.length > 1 && (
+                    <button className="icon-btn danger" onClick={() => removeItem(i)} title="Remover do arranjo">
+                      🗑
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null,
+        )}
+        <button className="add-block" onClick={addBlock} aria-label="Novo bloco">
+          +
+        </button>
+      </div>
+    </section>
+  );
+}
