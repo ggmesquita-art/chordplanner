@@ -4,7 +4,8 @@ import { instrumentProgress, instrumentStatus, play, type PlayOptions, previewNo
 import { configureMidi, midiSnapshot, subscribeMidi } from "../audio/midi";
 import type { Chord } from "../core/chords";
 import { makeSpeller, type Speller } from "../core/pitch";
-import { expandArrangement, expandRegion } from "../core/song";
+import { blockMeter, expandArrangement, expandRegion } from "../core/song";
+import { meterLabel } from "../core/timeline";
 import { voiceChord } from "../core/voicing";
 import { scaleContext } from "../core/diatonic";
 import { blockKey, flushSession, selectBlock, selectRegion, sessionAtRisk, useStore } from "../state/store";
@@ -122,4 +123,14 @@ export function useSessionGuard() {
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, []);
+}
+
+/** "Bloco · acorde N · compasso" do que está tocando, ou "—". */
+export function usePositionLabel(): string {
+  const song = useStore((s) => s.song);
+  const playhead = useStore((s) => s.playhead);
+  if (!playhead) return "—";
+  const item = song.arrangement[playhead.itemIndex];
+  const block = item && song.blocks[item.blockId];
+  return block ? `${block.name} · acorde ${playhead.chordIndex + 1} · ${meterLabel(blockMeter(song, block))}` : "—";
 }

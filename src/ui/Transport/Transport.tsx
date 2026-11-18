@@ -1,10 +1,9 @@
 import { useRef } from "react";
-import { blockMeter } from "../../core/song";
 import type { PlaybackPattern } from "../../core/song";
 import { tapTempo } from "../../core/tempo";
 import { METERS, meterLabel, type Meter } from "../../core/timeline";
 import { selectRegion, useStore } from "../../state/store";
-import { togglePlay } from "../hooks";
+import { togglePlay, usePositionLabel } from "../hooks";
 import { NumberField } from "../NumberField";
 import { PATTERNS } from "../patterns";
 import { Segmented } from "../Segmented";
@@ -13,7 +12,6 @@ import { MidiPanel } from "./MidiPanel";
 export function Transport() {
   const song = useStore((s) => s.song);
   const playing = useStore((s) => s.playing);
-  const playhead = useStore((s) => s.playhead);
   const loop = useStore((s) => s.loop);
   const scope = useStore((s) => s.playScope);
   const hasRegion = useStore((s) => selectRegion(s) !== null);
@@ -32,12 +30,7 @@ export function Transport() {
     if (res.bpm !== null) setBpm(res.bpm);
   };
 
-  let position = "—";
-  if (playhead) {
-    const item = song.arrangement[playhead.itemIndex];
-    const block = item && song.blocks[item.blockId];
-    if (block) position = `${block.name} · acorde ${playhead.chordIndex + 1} · ${meterLabel(blockMeter(song, block))}`;
-  }
+  const position = usePositionLabel();
 
   return (
     <div className="transport" role="toolbar" aria-label="Transporte">

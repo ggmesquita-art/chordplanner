@@ -1,6 +1,7 @@
 import { useRef } from "react";
 
-export type SegmentedOption<T extends string> = { value: T; text: string; title?: string; disabled?: boolean };
+/** `ariaLabel`: nome acessível quando o texto é só um ícone. */
+export type SegmentedOption<T extends string> = { value: T; text: string; title?: string; ariaLabel?: string; disabled?: boolean };
 
 /** Grupo de rádio com roving tabindex: setas movem e selecionam a opção vizinha habilitada. */
 export function Segmented<T extends string>({ value, options, onChange, label, small }: { value: T; options: SegmentedOption<T>[]; onChange: (v: T) => void; label: string; small?: boolean }) {
@@ -42,6 +43,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, s
           tabIndex={tabIndexFor(i)}
           className={value === o.value ? "on" : ""}
           title={o.title}
+          aria-label={o.ariaLabel}
           disabled={o.disabled}
           onClick={() => onChange(o.value)}
           onKeyDown={(e) => onKeyDown(e, i)}

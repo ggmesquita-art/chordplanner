@@ -14,6 +14,7 @@ vi.mock("../audio/engine", () => ({
 
 import { selectBlock, useStore } from "../state/store";
 import { ModifierPanel } from "./ModifierPanel/ModifierPanel";
+import { ExportMenu } from "./ExportMenu/ExportMenu";
 import { Progression } from "./Progression/Progression";
 
 const chords = () => selectBlock(useStore.getState())!.chords;
@@ -198,15 +199,20 @@ describe("alça, teclas e camadas de Esc", () => {
       <>
         <Progression />
         <ModifierPanel />
+        <ExportMenu />
       </>,
     );
     act(() => useStore.getState().selectChord(chords()[0].id));
     expect(screen.getByLabelText("Recolher modificadores")).toBeTruthy();
-    fireEvent.click(screen.getByText(/Exportar cifra/));
+    fireEvent.click(screen.getByRole("button", { name: "⤓ Exportar ▾" }));
+    fireEvent.click(screen.getByRole("button", { name: /Cifra \(texto\)/ }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Recolher modificadores")).toBeTruthy();
+    // O foco volta ao botão Exportar; com o foco de volta na página, o próximo Esc fecha a gaveta.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "⤓ Exportar ▾" }));
+    (document.activeElement as HTMLElement).blur();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.getByLabelText("Expandir modificadores")).toBeTruthy();
   });

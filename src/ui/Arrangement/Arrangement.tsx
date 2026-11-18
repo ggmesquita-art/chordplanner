@@ -5,7 +5,8 @@ import { arrangementLayout, blockUsage, keyLabel } from "../../core/view";
 import { useStore } from "../../state/store";
 import { barTicks } from "./barTicks";
 
-export function Arrangement() {
+/** `extra`: controles do contêiner (ex.: compactar o painel) no fim do cabeçalho. */
+export function Arrangement({ extra }: { extra?: React.ReactNode } = {}) {
   const song = useStore((s) => s.song);
   const selected = useStore((s) => s.selectedItem);
   const playhead = useStore((s) => s.playhead);
@@ -66,6 +67,7 @@ export function Arrangement() {
             </button>
           </span>
         )}
+        {extra}
       </div>
       <div className="lane" role="list" ref={laneRef}>
         {items.map(({ item, i, block, bars, start }) =>

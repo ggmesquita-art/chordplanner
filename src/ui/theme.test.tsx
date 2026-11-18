@@ -33,14 +33,14 @@ afterEach(() => {
 describe("tema", () => {
   it("Claro define o atributo", () => {
     render(<Harness />);
-    fireEvent.click(screen.getByRole("radio", { name: "☀ Claro" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Claro" }));
     expect(useStore.getState().theme).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("Auto remove o atributo", () => {
     render(<Harness />);
-    fireEvent.click(screen.getByRole("radio", { name: "☾ Escuro" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Escuro" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
     const auto = within(screen.getByRole("radiogroup", { name: "Tema" })).getByRole("radio", { name: "Auto" });
     fireEvent.click(auto);

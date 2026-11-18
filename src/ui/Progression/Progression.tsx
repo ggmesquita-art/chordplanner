@@ -4,14 +4,10 @@ import { getInstrumentDef } from "../../audio/instruments";
 import { FUNCTION_NAME, harmonicFunction } from "../../core/analysis";
 import type { Chord } from "../../core/chords";
 import { chordSymbol } from "../../core/modifiers";
-import { scaleContext } from "../../core/diatonic";
-import { makeSpeller } from "../../core/pitch";
-import { blockBeats, blockBpm, blockMeter, endingCut, expandArrangement, type Block, type PlaybackPattern } from "../../core/song";
+import { blockBeats, blockBpm, blockMeter, endingCut, expandArrangement, type PlaybackPattern } from "../../core/song";
 import { GRIDS, METERS, barLinesWithin, formatPosition, gridBeats, meterLabel, missingBeats, stepDuration, type Grid, type Meter } from "../../core/timeline";
 import { chordRole, chordStarts, chromaticTitle, droppedByChord, rulerMarks } from "../../core/view";
-import { blockKey, selectBlock, selectRegion, useStore } from "../../state/store";
-import { songToText } from "../../export/text";
-import { exportJson, shareUrl } from "../fileActions";
+import { selectBlock, selectRegion, useStore } from "../../state/store";
 import { NumberField } from "../NumberField";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { InstrumentPicker } from "../InstrumentPicker/InstrumentPicker";
@@ -57,65 +53,6 @@ function keepVisible(el: HTMLElement | null) {
   }
 }
 
-type TextModalData = { title: string; text: string; hint?: string };
-
-function TextModal({ data, onClose }: { data: TextModalData; onClose: () => void }) {
-  const [status, setStatus] = useState<"idle" | "copied" | "manual">("idle");
-  const area = useRef<HTMLTextAreaElement>(null);
-  const copyBtn = useRef<HTMLButtonElement>(null);
-
-  const close = useRef(onClose);
-
-  useEffect(() => {
-    close.current = onClose;
-  });
-
-  useEffect(() => {
-    copyBtn.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      e.preventDefault();
-      close.current();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-
-  const copy = async () => {
-    try {
-      if (!navigator.clipboard) throw new Error("sem área de transferência");
-      await navigator.clipboard.writeText(data.text);
-      setStatus("copied");
-    } catch {
-      area.current?.focus();
-      area.current?.select();
-      setStatus("manual");
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label={data.title} onClick={(e) => e.stopPropagation()}>
-        <h3>{data.title}</h3>
-        <textarea ref={area} readOnly value={data.text} rows={Math.min(16, data.text.split("\n").length + 1)} />
-        {data.hint && <p className="muted small">{data.hint}</p>}
-        {status === "manual" && (
-          <p className="small" role="status">
-            Selecione e copie (Ctrl+C)
-          </p>
-        )}
-        <div className="modal-actions">
-          <button ref={copyBtn} className="btn primary" onClick={() => void copy()}>
-            {status === "copied" ? "✓ Copiado" : "Copiar"}
-          </button>
-          <button className="btn" onClick={onClose}>
-            Fechar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function Progression() {
   const block = useBlock();
@@ -133,7 +70,6 @@ export function Progression() {
   const ctx = useCtx();
   const spell = useSpeller();
   const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const [modal, setModal] = useState<TextModalData | null>(null);
   const [live, setLive] = useState<{ id: string; beats: number } | null>(null);
   const [announce, setAnnounce] = useState("");
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -191,11 +127,6 @@ export function Progression() {
   const cut = editEnding ? endingCut(block, meter) : 0;
   const starts = chordStarts(list).map((x) => x + cut);
   const endingAvailable = editEnding || !!block.ending?.length || song.arrangement.some((it) => it.blockId === block.id && it.repeat >= 2);
-  const spellFor = (b: Block) => {
-    const st = useStore.getState();
-    const key = blockKey(st, b);
-    return makeSpeller(key?.tonic ?? null, key ? scaleContext(key.tonic, key.scaleId).pcs : [], st.accidentals);
-  };
 
   return (
     <section className="progression" aria-label="Progressão">
@@ -319,40 +250,6 @@ export function Progression() {
         </button>
         <button className="icon-btn" onClick={actions.clearBlock} title="Limpar bloco" aria-label="Limpar bloco">
           🗑
-        </button>
-        <button className="btn" onClick={() => setModal({ title: "Cifra por seção", text: songToText(song, spellFor) })}>
-          ⤓ Exportar cifra
-        </button>
-        <button
-          className="btn"
-          title="Arquivo MIDI com trilhas de acordes e baixo, tempo, compassos e marcadores — arraste para o Ableton"
-          onClick={() => {
-            const st = useStore.getState();
-            // @tonejs/midi só é baixado quando alguém exporta.
-            void import("../../export/midi").then(({ downloadMidi, songToMidi }) =>
-              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true, tonicFor: (id) => blockKey(st, st.song.blocks[id])?.tonic ?? null }), st.songName),
-            );
-          }}
-        >
-          ⤓ MIDI (.mid)
-        </button>
-        <button className="btn" title="Arquivo JSON da música (para guardar ou enviar)" onClick={() => exportJson()}>
-          ⤓ JSON
-        </button>
-        <button
-          className="btn"
-          title="Link que contém a música inteira"
-          onClick={() =>
-            void shareUrl().then((url) =>
-              setModal({
-                title: "Link de compartilhamento",
-                text: url,
-                hint: url.length > 8000 ? "Link longo: alguns aplicativos podem cortá-lo. Para músicas grandes, prefira exportar o JSON." : undefined,
-              }),
-            )
-          }
-        >
-          🔗 Link
         </button>
       </div>
 
@@ -512,7 +409,6 @@ export function Progression() {
         </div>
       )}
 
-      {modal && <TextModal data={modal} onClose={() => setModal(null)} />}
     </section>
   );
 }

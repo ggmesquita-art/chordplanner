@@ -132,22 +132,184 @@ h2 .muted {
 
 /* ——— Layout ——— */
 .app {
-  max-width: 1440px;
+  max-width: 1920px;
   margin: 0 auto;
-  padding: 12px 16px 24px;
+  padding: 8px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 .main {
+  --side-w: clamp(340px, 32vw, 520px);
   display: grid;
-  grid-template-columns: minmax(360px, 1.1fr) minmax(340px, 1fr);
-  gap: 12px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  gap: 8px;
+  align-items: stretch;
+  position: relative;
+}
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+/* Desktop: a página inteira cabe na janela; roda e painel lateral ocupam a altura que sobra. */
+@media (min-width: 901px) {
+  .app {
+    height: 100dvh;
+    /* Janela baixa demais para tudo: rola em vez de esmagar a roda. */
+    overflow-y: auto;
+  }
+  .main {
+    flex: 1;
+    min-height: 360px;
+  }
+  .main > * {
+    min-height: 0;
+  }
+  .wheel-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .wheel-panel .section-head {
+    margin-bottom: 4px;
+  }
+  .wheel-panel .wheel-wrap {
+    container: wheel / size;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .wheel-fit {
+    flex: 1;
+    min-height: 0;
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wheel-panel .wheel-stage {
+    width: min(100cqw, 100cqh);
+    max-width: none;
+  }
+  /* Área larga: legenda e dica vão para os cantos livres ao lado do círculo. */
+  @container wheel (min-aspect-ratio: 5/4) {
+    .wheel-wrap > .legend,
+    .wheel-wrap > .wheel-hint {
+      position: absolute;
+      bottom: 0;
+      margin: 0;
+      max-width: calc((100cqw - 100cqh) / 2 - 8px);
+    }
+    .wheel-wrap > .legend {
+      left: 0;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-end;
+    }
+    .wheel-wrap > .wheel-hint {
+      right: 0;
+      text-align: right;
+    }
+  }
+  /* Controles do topo mais baixos: cabeçalho e transporte numa linha cada em 1440 px. */
+  .top-panel {
+    font-size: 13px;
+  }
+  .top-panel .logo {
+    font-size: 16px;
+  }
+  .top-panel .btn,
+  .top-panel .toggle,
+  .top-panel .icon-btn {
+    padding: 3px 8px;
+  }
+  .top-panel .segmented button {
+    padding: 3px 8px;
+    font-size: 12.5px;
+  }
+  .top-panel .picker-button {
+    padding: 2px 8px;
+    min-height: 28px;
+    gap: 6px;
+  }
+  .top-panel .field input,
+  .top-panel .field select {
+    padding: 2px 4px;
+  }
+  .top-panel input[type="range"] {
+    width: 80px;
+  }
+  .top-panel .play {
+    width: 36px;
+    height: 28px;
+  }
+  .dock .block-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    align-items: center;
+  }
+  .dock .block-card > :not(.block-top, .block-meta) {
+    grid-column: 1 / -1;
+  }
+  .dock .block-meta {
+    justify-content: flex-end;
+  }
+  /* Card de acorde em 3 linhas: cifra + grau, duração/ações, régua. */
+  .dock .chord-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 6px;
+    align-items: baseline;
+  }
+  .dock .chord-card > :not(.chord-top, .chord-roman) {
+    grid-column: 1 / -1;
+  }
+  .dock .chord-card .chord-top {
+    justify-content: flex-start;
+  }
+
+  .side {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .dock {
+    flex: none;
+  }
+  /* Sem espaço abaixo do painel: os menus dele abrem para cima. */
+  .dock .popover {
+    top: auto;
+    bottom: calc(100% + 6px);
+  }
+  /* Compacto: o acompanhamento fica por cima da parte de baixo da coluna da roda. */
+  .app.dock-compact .wheel-panel {
+    padding-bottom: 92px;
+  }
+  .mini-dock {
+    position: absolute;
+    left: 8px;
+    right: calc(var(--side-w) + 16px);
+    bottom: 8px;
+  }
+}
+@media (min-width: 901px) and (max-width: 1679px) {
+  /* Rótulos dos seletores do topo somem (o valor e a dica continuam): cabeçalho numa linha só. */
+  .top-panel .picker-label {
+    display: none;
+  }
 }
 @media (max-width: 900px) {
   .main {
     grid-template-columns: 1fr;
+  }
+  .mini-dock {
+    position: sticky;
+    bottom: 60px;
   }
 }
 section,
@@ -575,6 +737,18 @@ section {
   position: relative;
   max-width: 560px;
   margin: 0 auto;
+}
+.wheel-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+.wheel-suggest {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
 }
 .wheel {
   width: 100%;
@@ -1185,6 +1359,247 @@ section {
 }
 .footer {
   text-align: center;
+  padding: 0 8px;
+}
+
+/* ——— Topo (fixo ou automático) ——— */
+.topbar {
+  position: relative;
+  z-index: 30;
+  flex: none;
+}
+.top-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.top-panel .header,
+.top-panel .transport {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.top-panel .header {
+  padding: 6px 12px;
+  gap: 8px;
+}
+.top-panel .transport {
+  padding: 5px 44px 6px 12px;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+}
+.top-collapse {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 11; /* acima do transporte (z 10, por causa dos popovers) */
+}
+.top-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 3px 8px 3px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.strip-logo {
+  font-size: 14px;
+  margin: 0;
+}
+.strip-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
+.strip-pos {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.play.small {
+  width: 34px;
+  height: 28px;
+  font-size: 13px;
+}
+.topbar.auto .top-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.15s,
+    transform 0.15s,
+    visibility 0s linear 0.15s;
+}
+.topbar.auto.open .top-panel {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+@media (max-width: 640px) {
+  .strip-logo,
+  .strip-pos {
+    display: none;
+  }
+  .top-strip {
+    gap: 6px;
+    overflow-x: auto;
+  }
+}
+
+/* ——— Painel inferior (arranjo + progressão) ——— */
+.dock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dock > section {
+  padding: 7px 12px 8px;
+}
+.dock .section-head {
+  margin-bottom: 5px;
+  gap: 8px;
+}
+.dock .block-card {
+  padding: 3px 8px 4px;
+  row-gap: 1px;
+  border-top-width: 3px;
+}
+.dock .bar-ticks {
+  height: 10px;
+}
+.dock .add-block {
+  min-width: 36px;
+}
+.dock .prog-toolbar {
+  margin-bottom: 5px;
+  gap: 5px;
+}
+.dock .timeline {
+  min-height: 0;
+  padding-bottom: 4px;
+}
+.dock .chord-card {
+  padding: 4px 7px 2px;
+  row-gap: 0;
+}
+.dock .chord-ruler {
+  margin-top: 3px;
+  height: 10px;
+}
+.dock-toggle {
+  flex: none;
+}
+
+/* Compacto: só acompanhamento (blocos + acordes do bloco em foco). */
+.mini-dock {
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.mini-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.mini-block,
+.mini-chord {
+  flex-basis: 0;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mini-block {
+  --block: var(--accent);
+  min-width: 60px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--block) 45%, transparent);
+  border-top: 3px solid var(--block);
+  background: color-mix(in srgb, var(--block) 14%, var(--panel-2));
+}
+.mini-block.selected {
+  box-shadow: inset 0 0 0 1px var(--block);
+}
+.mini-block.playing {
+  background: color-mix(in srgb, var(--block) 42%, var(--panel-2));
+}
+.mini-chord {
+  min-width: 44px;
+  padding: 5px 8px;
+  font-size: 15px;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  transition: background 0.1s;
+}
+.mini-chord.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.mini-chord.playing {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 32%, var(--panel-2));
+}
+.mini-tag {
+  align-self: center;
+  color: var(--tension);
+  font-weight: 700;
+}
+.mini-dock .dock-toggle {
+  margin-left: 4px;
+}
+
+/* ——— Menu de exportação ——— */
+.export-pop {
+  width: min(360px, 92vw);
+  padding-bottom: 6px;
+}
+.export-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.export-item:hover,
+.export-item:focus-visible {
+  background: var(--panel-2);
 }
 
 .midi-pop {
@@ -1577,4 +1992,23 @@ section {
 }
 .fretboard-empty {
   margin: 10px 0 4px;
+}
+
+.dock .prog-toolbar .check .muted {
+  display: none;
+}
+
+/* Lista por graus na coluna lateral. */
+.degrees-panel {
+  padding: 8px 10px;
+}
+.degrees-panel .degree-strip {
+  margin-top: 0;
+}
+@media (min-width: 901px) {
+  .degrees-panel .degree-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+    gap: 4px;
+  }
 }

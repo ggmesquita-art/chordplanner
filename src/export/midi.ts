@@ -4,7 +4,10 @@
 import { Midi } from "@tonejs/midi";
 import { instrumentByPatchID } from "@tonejs/midi/dist/InstrumentMaps";
 import { gmProgram, renderNotes } from "../audio/render";
-import { expandArrangement, type Song, type TempoPoint } from "../core/song";
+import { chordSymbol } from "../core/modifiers";
+import { resolveNotation, toAscii } from "../core/notation";
+import type { Speller } from "../core/pitch";
+import { expandArrangement, type Block, type Song, type TempoPoint } from "../core/song";
 
 const PPQ = 480;
 const ACOUSTIC_BASS = 32;
@@ -16,6 +19,12 @@ export type MidiExportOptions = {
   splitBass: boolean;
   /** Tônica (pitch class) do bloco para o bordão (respeita a tonalidade própria do bloco); sem ela, o bloco não exporta bordão. */
   tonicFor?: (blockId: string) => number | null;
+  /** Escreve o nome de cada acorde como evento `lyrics` (ASCII: # b dim) no início dele. Padrão: true. */
+  chordNames?: boolean;
+  /** Grafia dos nomes de acorde por bloco (tonalidade própria). Padrão: derivada de `block.key`. */
+  spellFor?: (block: Block) => Speller;
+  /** Nome da música (trilha de andamento). */
+  title?: string;
 };
 
 export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
@@ -55,7 +64,17 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
   midi.header.timeSignatures = expanded.tempoMap
     .filter((t, i, all) => i === 0 || t.meter.join("/") !== all[i - 1].meter.join("/"))
     .map((t) => ({ ticks: tickOf(t), timeSignature: [...t.meter] }));
-  midi.header.meta = expanded.markers.map((m) => ({ type: "marker", text: m.name, ticks: tickAtSec(m.startSec) }));
+  if (opts.title?.trim()) midi.header.name = opts.title.trim();
+  const meta: typeof midi.header.meta = expanded.markers.map((m) => ({ type: "marker", text: m.name, ticks: tickAtSec(m.startSec) }));
+  if (opts.chordNames !== false) {
+    // Nome do acorde em cada ataque (DAWs e MuseScore mostram lyrics); sem repetir enquanto o mesmo acorde continua.
+    const spellFor = resolveNotation({ spellFor: opts.spellFor }).spellFor;
+    expanded.events.forEach((ev, i) => {
+      const block = song.blocks[ev.blockId];
+      if (block) meta.push({ type: "lyrics", text: toAscii(chordSymbol(ev.chord, spellFor(block))), ticks: eventTicks[i] });
+    });
+  }
+  midi.header.meta = meta.map((m, i) => ({ m, i })).sort((a, b) => a.m.ticks - b.m.ticks || a.i - b.i).map(({ m }) => m);
   midi.header.update();
 
   const notes = renderNotes(expanded, {

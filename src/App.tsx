@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import { useStore } from "./state/store";
-import { Arrangement } from "./ui/Arrangement/Arrangement";
 import { ChordWheel, DegreeStrip } from "./ui/ChordWheel/ChordWheel";
-import { Header } from "./ui/Header";
 import { togglePlay, useMidiSync, useSessionGuard } from "./ui/hooks";
+import { Dock, MiniDock } from "./ui/Layout/Dock";
+import { TopBar } from "./ui/Layout/TopBar";
 import { ModifierPanel } from "./ui/ModifierPanel/ModifierPanel";
 import { SharedLink } from "./ui/SharedLink";
 import { Practice } from "./ui/Practice/Practice";
-import { Progression } from "./ui/Progression/Progression";
-import { Transport } from "./ui/Transport/Transport";
 import { useTheme } from "./ui/useTheme";
 
 function useShortcuts() {
@@ -44,12 +42,12 @@ export default function App() {
   const [practiceOpen, setPracticeOpen] = useState(false);
   const showDegrees = useStore((s) => s.showDegrees);
   const setShowDegrees = useStore((s) => s.setShowDegrees);
+  const dock = useStore((s) => s.dock);
 
   return (
-    <div className="app">
+    <div className={`app dock-${dock}`}>
       <SharedLink />
-      <Header />
-      <Transport />
+      <TopBar />
       <main className="main">
         <section className="wheel-panel" aria-label="Roda de acordes">
           <div className="section-head">
@@ -72,15 +70,21 @@ export default function App() {
             </label>
           </div>
           <ChordWheel />
-          {showDegrees && <DegreeStrip />}
         </section>
-        <ModifierPanel />
+        <aside className="side">
+          {showDegrees && (
+            <section className="degrees-panel" aria-label="Graus da escala">
+              <DegreeStrip />
+            </section>
+          )}
+          <ModifierPanel />
+          <footer className="footer muted small">
+            Espaço: tocar/parar · Ctrl+Z / Ctrl+Shift+Z: desfazer/refazer · Setas + Enter navegam na roda · Samples: SplendidGrandPiano, Greg Sullivan E-Pianos, VCSL, Smolken e MusyngKite (via smplr)
+          </footer>
+        </aside>
+        {dock === "compact" && <MiniDock />}
       </main>
-      <Arrangement />
-      <Progression />
-      <footer className="footer muted small">
-        Espaço: tocar/parar · Ctrl+Z / Ctrl+Shift+Z: desfazer/refazer · Setas + Enter navegam na roda · Samples: SplendidGrandPiano, Greg Sullivan E-Pianos, VCSL, Smolken e MusyngKite (via smplr)
-      </footer>
+      {dock === "full" && <Dock />}
       {practiceOpen && <Practice onClose={() => setPracticeOpen(false)} />}
     </div>
   );

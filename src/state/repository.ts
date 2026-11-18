@@ -32,6 +32,10 @@ export type Session = {
   soundOnHover?: boolean;
   /** Visualização do voicing no painel de modificadores. */
   instrumentView?: "keyboard" | "guitar";
+  /** Topo: fixo (sempre visível) ou automático (faixa fina que expande ao passar o mouse). */
+  topBar?: TopBarMode;
+  /** Painel inferior (arranjo + progressão): completo ou compacto (sobreposto à roda). */
+  dock?: DockMode;
   theme?: Theme;
   midi?: MidiSettings;
   song: Song;
@@ -108,6 +112,8 @@ const songVersion = (s: SavedSong) => (typeof s.version === "number" ? s.version
 
 const SCALE_IDS = new Set(SCALES.map((s) => s.id));
 const THEMES: Theme[] = ["auto", "light", "dark"];
+export type TopBarMode = "pinned" | "auto";
+export type DockMode = "full" | "compact";
 const MODES: RestrictionMode[] = ["strict", "colorful", "free"];
 const ACCIDENTALS: AccidentalPref[] = ["auto", "sharp", "flat"];
 const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
@@ -139,6 +145,8 @@ export class LocalSongRepository implements SongRepository {
         showDegrees: bool(p.showDegrees, true),
         soundOnHover: bool(p.soundOnHover, false),
         instrumentView: p.instrumentView === "guitar" ? "guitar" : "keyboard",
+        topBar: p.topBar === "auto" ? "auto" : "pinned",
+        dock: p.dock === "compact" ? "compact" : "full",
         theme: THEMES.find((t) => t === p.theme) ?? "auto",
         midi: typeof p.midi === "object" && p.midi !== null ? (p.midi as MidiSettings) : undefined,
         songId: typeof p.songId === "string" ? p.songId : null,

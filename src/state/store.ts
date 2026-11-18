@@ -15,7 +15,7 @@ import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
 import { sanitizeContent, type SongContent } from "../export/json";
 import { CURRENT_VERSION } from "../export/migrate";
-import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme } from "./repository";
+import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme, type TopBarMode, type DockMode } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
 
@@ -64,7 +64,7 @@ export function normalizeHash(hash: string | null): string | null {
 /** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
 type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
-type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "instrumentView" | "theme"> & {
+type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "instrumentView" | "theme" | "topBar" | "dock"> & {
   theme: Theme;
   midi: MidiSettings;
   countIn: boolean;
@@ -72,6 +72,8 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   showDegrees: boolean;
   soundOnHover: boolean;
   instrumentView: "keyboard" | "guitar";
+  topBar: TopBarMode;
+  dock: DockMode;
   /** Outra ponta da região selecionada (id de acorde do bloco atual); a primeira é `selectedChord`. */
   regionEnd: string | null;
   /** A progressão edita a casa 2 do bloco (`block.ending`) em vez dos acordes principais. */
@@ -108,6 +110,8 @@ type Actions = {
   setShowDegrees: (v: boolean) => void;
   setSoundOnHover: (v: boolean) => void;
   setInstrumentView: (v: "keyboard" | "guitar") => void;
+  setTopBar: (v: TopBarMode) => void;
+  setDock: (v: DockMode) => void;
   setTheme: (t: Theme) => void;
   /** Estende a seleção até este acorde do bloco atual (null desfaz a região). */
   setRegionEnd: (id: string | null) => void;
@@ -193,7 +197,7 @@ function initialState(): State {
     countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, instrumentView = "keyboard", theme = "auto", ...rest } = base;
+  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, instrumentView = "keyboard", theme = "auto", topBar = "pinned", dock = "full", ...rest } = base;
   return {
     ...rest,
     theme,
@@ -202,6 +206,8 @@ function initialState(): State {
     showDegrees,
     soundOnHover,
     instrumentView,
+    topBar,
+    dock,
     regionEnd: null,
     editEnding: false,
     // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
@@ -405,6 +411,8 @@ export const useStore = create<Store>()((set, get) => {
     setShowDegrees: (showDegrees) => set({ showDegrees }),
     setSoundOnHover: (soundOnHover) => set({ soundOnHover }),
     setInstrumentView: (instrumentView) => set({ instrumentView }),
+    setTopBar: (topBar) => set({ topBar }),
+    setDock: (dock) => set({ dock }),
     setTheme: (theme) => set({ theme }),
     setRegionEnd: (regionEnd) => set({ regionEnd }),
     setLoop: (loop) => set({ loop }),
@@ -806,6 +814,8 @@ function buildSession(s: State): Session {
     showDegrees: s.showDegrees,
     soundOnHover: s.soundOnHover,
     instrumentView: s.instrumentView,
+    topBar: s.topBar,
+    dock: s.dock,
     theme: s.theme,
     midi: s.midi,
     song: s.song,

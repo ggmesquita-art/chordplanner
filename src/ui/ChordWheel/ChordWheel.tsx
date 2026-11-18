@@ -212,138 +212,143 @@ export function ChordWheel() {
       <label className="wheel-suggest small">
         <input type="checkbox" checked={suggest} onChange={(e) => setSuggest(e.target.checked)} /> Sugestões
       </label>
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="wheel" role="group" aria-label="Roda de acordes (círculo de quintas)">
-        {RINGS.map((ring, ri) =>
-          Array.from({ length: 12 }, (_, pos) => {
-            const { root, state: st, clickable: can, chromatic, roman, icon } = slices[ri][pos];
-            const angle = pos * 30 + rotation;
-            const isTonic = ctx !== null && root === ctx.tonic && ctx.degrees[0]?.primary === ring.quality;
-            const isSel = selected && selected.root === root && selected.quality === ring.quality;
-            const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
-            const sym = chordSymbol(makeChord(root, ring.quality), spell);
-            const [lx, ly] = pt((ring.r0 + ring.r1) / 2 + (roman ? 7 : 0), angle);
-            const [rx, ry] = pt((ring.r0 + ring.r1) / 2 - 13, angle);
-            return (
-              <g
-                key={`${ri}-${pos}`}
-                ref={(el) => void (el ? refs.current.set(`${ri}-${pos}`, el) : refs.current.delete(`${ri}-${pos}`))}
-                className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""}`}
-                tabIndex={0}
-                role="button"
-                aria-disabled={!can}
-                aria-label={spokenChord(sym, roman, st, chromatic?.kind)}
-                onClick={() => activate(root, ring.quality)}
-                onKeyDown={(e) => onKey(e, ri, pos, root, ring.quality)}
-                onMouseEnter={() => setHover({ root, quality: ring.quality })}
-                onMouseLeave={() => setHover(null)}
-                onPointerEnter={(e) => onSliceEnter(e, `${ri}-${pos}`, root, ring.quality, can)}
-                onPointerLeave={onSliceLeave}
-                onFocus={() => setHover({ root, quality: ring.quality })}
-                onBlur={() => setHover(null)}
-              >
-                <path d={sector(ring.r0, ring.r1, angle - 15, angle + 15)} />
-                <text x={lx} y={ly} className="slice-label" textAnchor="middle" dominantBaseline="central">
-                  {sym}
-                  {icon && <tspan className="slice-icon"> {icon}</tspan>}
+      {/* Quadrado que cabe na área disponível: o menu radial se posiciona em fração deste quadrado. */}
+      <div className="wheel-fit">
+        <div className="wheel-stage">
+          <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="wheel" role="group" aria-label="Roda de acordes (círculo de quintas)">
+            {RINGS.map((ring, ri) =>
+              Array.from({ length: 12 }, (_, pos) => {
+                const { root, state: st, clickable: can, chromatic, roman, icon } = slices[ri][pos];
+                const angle = pos * 30 + rotation;
+                const isTonic = ctx !== null && root === ctx.tonic && ctx.degrees[0]?.primary === ring.quality;
+                const isSel = selected && selected.root === root && selected.quality === ring.quality;
+                const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
+                const sym = chordSymbol(makeChord(root, ring.quality), spell);
+                const [lx, ly] = pt((ring.r0 + ring.r1) / 2 + (roman ? 7 : 0), angle);
+                const [rx, ry] = pt((ring.r0 + ring.r1) / 2 - 13, angle);
+                return (
+                  <g
+                    key={`${ri}-${pos}`}
+                    ref={(el) => void (el ? refs.current.set(`${ri}-${pos}`, el) : refs.current.delete(`${ri}-${pos}`))}
+                    className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""}`}
+                    tabIndex={0}
+                    role="button"
+                    aria-disabled={!can}
+                    aria-label={spokenChord(sym, roman, st, chromatic?.kind)}
+                    onClick={() => activate(root, ring.quality)}
+                    onKeyDown={(e) => onKey(e, ri, pos, root, ring.quality)}
+                    onMouseEnter={() => setHover({ root, quality: ring.quality })}
+                    onMouseLeave={() => setHover(null)}
+                    onPointerEnter={(e) => onSliceEnter(e, `${ri}-${pos}`, root, ring.quality, can)}
+                    onPointerLeave={onSliceLeave}
+                    onFocus={() => setHover({ root, quality: ring.quality })}
+                    onBlur={() => setHover(null)}
+                  >
+                    <path d={sector(ring.r0, ring.r1, angle - 15, angle + 15)} />
+                    <text x={lx} y={ly} className="slice-label" textAnchor="middle" dominantBaseline="central">
+                      {sym}
+                      {icon && <tspan className="slice-icon"> {icon}</tspan>}
+                    </text>
+                    {chromatic && (
+                      <title>
+                        {chromaticTitle(chromatic, true)}
+                      </title>
+                    )}
+                    {roman && (
+                      <text x={rx} y={ry} className="slice-roman" textAnchor="middle" dominantBaseline="central">
+                        {roman}
+                      </text>
+                    )}
+                    {hover && sharedPcs.size > 0 && sharedPcs.has(root) && (
+                      <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
+                    )}
+                    {(() => {
+                      // Só em fatias clicáveis no modo atual (Estrito não mostra pontos em fatias bloqueadas).
+                      const sg = can ? suggestions.get(`${root}-${ring.quality}`) : undefined;
+                      if (!sg) return null;
+                      const [dx, dy] = pt(ring.r0 + 9, angle);
+                      return (
+                        <circle cx={dx} cy={dy} r={5} className="suggest-dot" opacity={0.25 + 0.75 * sg.weight}>
+                          <title>{`Sugestão: ${sg.reason}`}</title>
+                        </circle>
+                      );
+                    })()}
+                  </g>
+                );
+              }),
+            )}
+
+            {/* Badges: qualidades que não cabem nos 3 anéis (aug, sus, power chord). */}
+            {ctx?.degrees.map((deg) => {
+              const extras = extraQualities(deg);
+              if (!extras.length) return null;
+              const angle = fifthsPosition(deg.root) * 30 + rotation;
+              const [bx, by] = pt(256, angle);
+              return (
+                <g
+                  key={`badge-${deg.root}`}
+                  ref={(el) => void (el ? badgeRefs.current.set(deg.root, el) : badgeRefs.current.delete(deg.root))}
+                  className="badge"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Outras qualidades em ${spell(deg.root)}: ${extras.join(", ")}`}
+                  onClick={() => setMenu({ root: deg.root, x: bx / SIZE, y: by / SIZE, qualities: extras })}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setMenu({ root: deg.root, x: bx / SIZE, y: by / SIZE, qualities: extras })}
+                >
+                  <circle cx={bx} cy={by} r={13} />
+                  <text x={bx} y={by} textAnchor="middle" dominantBaseline="central">
+                    +{extras.length}
+                  </text>
+                </g>
+              );
+            })}
+
+            <circle cx={C} cy={C} r={56} className="wheel-center" />
+            {hoverInfo ? (
+              <g className="center-text">
+                <text x={C} y={C - 16} textAnchor="middle" className="center-big">
+                  {hoverInfo.symbol}
                 </text>
-                {chromatic && (
-                  <title>
-                    {chromaticTitle(chromatic, true)}
-                  </title>
-                )}
-                {roman && (
-                  <text x={rx} y={ry} className="slice-roman" textAnchor="middle" dominantBaseline="central">
-                    {roman}
+                <text x={C} y={C + 4} textAnchor="middle" className="center-small">
+                  {hoverInfo.roman} · {hoverInfo.notes}
+                </text>
+                {hoverInfo.shared && (
+                  <text x={C} y={C + 22} textAnchor="middle" className="center-small muted-fill">
+                    comum: {hoverInfo.shared.length ? hoverInfo.shared.join(" ") : "—"}
                   </text>
                 )}
-                {hover && sharedPcs.size > 0 && sharedPcs.has(root) && (
-                  <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
-                )}
-                {(() => {
-                  // Só em fatias clicáveis no modo atual (Estrito não mostra pontos em fatias bloqueadas).
-                  const sg = can ? suggestions.get(`${root}-${ring.quality}`) : undefined;
-                  if (!sg) return null;
-                  const [dx, dy] = pt(ring.r0 + 9, angle);
-                  return (
-                    <circle cx={dx} cy={dy} r={5} className="suggest-dot" opacity={0.25 + 0.75 * sg.weight}>
-                      <title>{`Sugestão: ${sg.reason}`}</title>
-                    </circle>
-                  );
-                })()}
               </g>
-            );
-          }),
-        )}
-
-        {/* Badges: qualidades que não cabem nos 3 anéis (aug, sus, power chord). */}
-        {ctx?.degrees.map((deg) => {
-          const extras = extraQualities(deg);
-          if (!extras.length) return null;
-          const angle = fifthsPosition(deg.root) * 30 + rotation;
-          const [bx, by] = pt(256, angle);
-          return (
-            <g
-              key={`badge-${deg.root}`}
-              ref={(el) => void (el ? badgeRefs.current.set(deg.root, el) : badgeRefs.current.delete(deg.root))}
-              className="badge"
-              role="button"
-              tabIndex={0}
-              aria-label={`Outras qualidades em ${spell(deg.root)}: ${extras.join(", ")}`}
-              onClick={() => setMenu({ root: deg.root, x: bx / SIZE, y: by / SIZE, qualities: extras })}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setMenu({ root: deg.root, x: bx / SIZE, y: by / SIZE, qualities: extras })}
-            >
-              <circle cx={bx} cy={by} r={13} />
-              <text x={bx} y={by} textAnchor="middle" dominantBaseline="central">
-                +{extras.length}
-              </text>
-            </g>
-          );
-        })}
-
-        <circle cx={C} cy={C} r={56} className="wheel-center" />
-        {hoverInfo ? (
-          <g className="center-text">
-            <text x={C} y={C - 16} textAnchor="middle" className="center-big">
-              {hoverInfo.symbol}
-            </text>
-            <text x={C} y={C + 4} textAnchor="middle" className="center-small">
-              {hoverInfo.roman} · {hoverInfo.notes}
-            </text>
-            {hoverInfo.shared && (
-              <text x={C} y={C + 22} textAnchor="middle" className="center-small muted-fill">
-                comum: {hoverInfo.shared.length ? hoverInfo.shared.join(" ") : "—"}
-              </text>
+            ) : (
+              <g className="center-text">
+                <text x={C} y={C - 6} textAnchor="middle" className="center-big">
+                  {ctx === null ? "?" : spell(ctx.tonic)}
+                </text>
+                <text x={C} y={C + 16} textAnchor="middle" className="center-small">
+                  {ctx === null ? "escolha a tônica" : shortScaleName(ctx.scale.id)}
+                </text>
+                {ctx !== null && tonic !== null && (ctx.tonic !== tonic || ctx.scale.id !== globalScaleId) && (
+                  <text x={C} y={C + 32} textAnchor="middle" className="center-small muted-fill">
+                    modulação
+                  </text>
+                )}
+              </g>
             )}
-          </g>
-        ) : (
-          <g className="center-text">
-            <text x={C} y={C - 6} textAnchor="middle" className="center-big">
-              {ctx === null ? "?" : spell(ctx.tonic)}
-            </text>
-            <text x={C} y={C + 16} textAnchor="middle" className="center-small">
-              {ctx === null ? "escolha a tônica" : shortScaleName(ctx.scale.id)}
-            </text>
-            {ctx !== null && tonic !== null && (ctx.tonic !== tonic || ctx.scale.id !== globalScaleId) && (
-              <text x={C} y={C + 32} textAnchor="middle" className="center-small muted-fill">
-                modulação
-              </text>
-            )}
-          </g>
-        )}
-      </svg>
+          </svg>
 
-      {menu && (
-        <div className="radial-menu" ref={menuRef} onKeyDown={onMenuKey} style={{ left: `${menu.x * 100}%`, top: `${menu.y * 100}%` }} role="menu">
-          {menu.qualities.map((q) => (
-            <button key={q} role="menuitem" onClick={() => activate(menu.root, q)}>
-              {chordSymbol(makeChord(menu.root, q), spell)}
-            </button>
-          ))}
-          <button className="muted" onClick={() => setMenu(null)} aria-label="Fechar">
-            ✕
-          </button>
+          {menu && (
+            <div className="radial-menu" ref={menuRef} onKeyDown={onMenuKey} style={{ left: `${menu.x * 100}%`, top: `${menu.y * 100}%` }} role="menu">
+              {menu.qualities.map((q) => (
+                <button key={q} role="menuitem" onClick={() => activate(menu.root, q)}>
+                  {chordSymbol(makeChord(menu.root, q), spell)}
+                </button>
+              ))}
+              <button className="muted" onClick={() => setMenu(null)} aria-label="Fechar">
+                ✕
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       <div className="legend small">
         <span>

@@ -60,7 +60,8 @@ describe("App (fumaça)", () => {
     // Novo bloco + template + export.
     await act(async () => fireEvent.click(screen.getByLabelText("Novo bloco")));
     expect(useStore.getState().song.arrangement.length).toBe(2);
-    await act(async () => fireEvent.click(screen.getByText("⤓ Exportar cifra")));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "⤓ Exportar ▾" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Cifra \(texto\)/ })));
     expect((screen.getByRole("dialog").querySelector("textarea") as HTMLTextAreaElement).value).toContain("A7");
   });
 

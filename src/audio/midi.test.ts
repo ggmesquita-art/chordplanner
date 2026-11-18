@@ -90,6 +90,27 @@ describe("export .mid", () => {
   });
 });
 
+describe("export .mid: nomes de acordes", () => {
+  it("lyrics com o nome de cada acorde (ASCII) no tick do ataque; pode ser desligado", () => {
+    const song = song2();
+    song.blocks[song.arrangement[0].blockId].chords = [makeChord(10, "dim", 4), makeChord(7, "maj", 4)];
+    const midi = new Midi(songToMidi(song, { channel: 1, splitBass: true, title: "Música" }));
+    const ppq = midi.header.ppq;
+    const lyrics = midi.header.meta.filter((m) => m.type === "lyrics");
+    expect(lyrics.map((m) => m.text)).toEqual(["Bbdim", "G", "F"]);
+    expect(lyrics.map((m) => m.ticks)).toEqual([0, 4 * ppq, 8 * ppq]);
+    expect(midi.header.meta.filter((m) => m.type === "marker").length).toBe(2);
+    expect(midi.header.name).toBe("Música");
+    expect(new Midi(songToMidi(song, { channel: 1, splitBass: true, chordNames: false })).header.meta.some((m) => m.type === "lyrics")).toBe(false);
+  });
+  it("respeita a grafia do bloco", () => {
+    const song = song2();
+    song.blocks[song.arrangement[0].blockId].chords = [makeChord(10, "maj", 8)];
+    const midi = new Midi(songToMidi(song, { channel: 1, splitBass: true, spellFor: () => (pc) => (pc === 10 ? "B♭" : "?") }));
+    expect(midi.header.meta.find((m) => m.type === "lyrics")!.text).toBe("Bb");
+  });
+});
+
 describe("countIn", () => {
   it("4/4 a 120 bpm: 4 cliques de meio segundo, só o primeiro acentuado", () => {
     const song = song2();
