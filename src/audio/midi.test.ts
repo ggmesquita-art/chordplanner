@@ -309,3 +309,18 @@ describe("export .mid: rampa e camada de baixo", () => {
     expect(count()).toBe(before * 2);
   });
 });
+
+describe("export .mid: bordão por bloco", () => {
+  it("usa a tônica do bloco (tonicFor), não uma global", () => {
+    const song = makeSong();
+    const a = song.blocks[song.arrangement[0].blockId];
+    a.chords = [makeChord(7, "maj", 4)];
+    a.instrument = "bagpipe";
+    a.drone = true;
+    const drones = (tonic: number | null) =>
+      new Midi(songToMidi(song, { channel: 1, splitBass: true, tonicFor: () => tonic })).tracks.flatMap((t) => t.notes).filter((n) => Math.abs(n.velocity - 0.4) < 0.01);
+    expect(drones(2).map((n) => n.midi)).toEqual([38]);
+    expect(drones(9).map((n) => n.midi)).toEqual([45]);
+    expect(drones(null)).toEqual([]);
+  });
+});

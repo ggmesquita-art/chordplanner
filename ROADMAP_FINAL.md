@@ -1,14 +1,13 @@
 # ChordPlanner — Roadmap final
 
-> Situação em 13/11/2026, depois da revisão completa do código contra o [`DESIGN.md`](DESIGN.md).
+> Criado em 13/11/2026 a partir da revisão do código contra o [`DESIGN.md`](DESIGN.md); atualizado em 18/11/2026 com o roadmap concluído.
 > As seções (§) referem-se ao `DESIGN.md`. Este arquivo substitui o roadmap do §9 como lista de trabalho.
 
 ## Onde o projeto está
 
-- **MVP: completo.** Catálogo de 73 escalas, roda de 3 anéis, progressão, modificadores, playback, 55 instrumentos.
-- **v1: quase completa.** Blocos e arranjo, fórmulas de compasso, swing, templates, modos Estrito/Colorido/Livre, instrumentos sugeridos por escala, salvar/abrir, export de cifra, MIDI e JSON, link de compartilhamento e contagem estão prontos. Falta o que está na Etapa 1.
-- **v2: só o que foi antecipado.** Dominantes secundárias, empréstimo modal, saída MIDI ao vivo e export `.mid` existem; o resto da v2 não começou.
-- **Saúde:** typecheck, lint e build limpos; 293 testes passando; sem vulnerabilidades em `npm audit`.
+- **MVP, v1, v2 e v3: concluídos.** Todos os itens das Etapas 1 a 5 abaixo estão feitos.
+- **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
+- **Saúde:** typecheck, lint e build limpos; 357 testes passando; sem vulnerabilidades em `npm audit`.
 
 ### Entregue na última rodada
 
@@ -104,18 +103,18 @@ Ordem sugerida: os dois primeiros itens destravam os demais.
 - [x] Condução de vozes automática, opcional (§5.1).
 - [x] Sétimas por grau (7, maj7, m7, m(maj7), m7♭5, °7) como chips na lista por graus (§2.5).
 - [x] Empréstimos de outros modos com a mesma tônica, ii/x secundários e substituto de trítono (♭II → I) (§3.7). Com isso o modo Colorido libera bem mais: 25 de 36 fatias em Ré maior (antes 18).
-- [ ] Modulação por bloco: tônica e escala próprias (§3.8).
+- [x] Modulação por bloco: tônica e escala próprias ("Modular" no cabeçalho do bloco); a roda, a grafia, os graus, a cifra e o bordão seguem o tom do bloco (§3.8).
 - [x] Ritardando/accelerando por bloco ("♩ final"), também no export MIDI (§3.8).
-- [ ] Casa 1/casa 2 (§3.8).
+- [x] Casa 1/casa 2: a casa 2 substitui o último compasso na última repetição; edição na progressão ("+ Casa 2") e cifra com `|: … 1. … :| 2. … |` (§3.8).
 - [x] Camada de baixo com instrumento próprio por bloco, também na trilha "Baixo" do MIDI (§3.9).
 - [x] Bordão contínuo na tônica por bloco, para instrumentos com `drone` (sitar, gaita de foles) (§5.2).
 - [x] Re-ataque por compasso para instrumentos de decay em acordes longos (toggle "Re-atacar") (§5.2).
 
 ## Etapa 5 — v3
 
-- [ ] Visualização de braço de violão/guitarra.
-- [ ] Modo prática: ouvir e adivinhar o grau.
-- [ ] PWA offline.
+- [x] Visualização de braço de violão (Teclado | Violão no painel de modificadores), com digitação tocável calculada em `core/fretboard.ts`.
+- [x] Modo prática: cadência + acorde, responder o grau (Básico ou Todos os graus), com placar.
+- [x] PWA offline: manifest, ícones e service worker gerado no build; o app abre sem rede depois da primeira visita (samples só os já baixados).
 
 ---
 

@@ -68,6 +68,8 @@ export type TimedChord = {
   instrument: InstrumentId;
   /** BPM ao fim do acorde; só difere de `bpm` dentro de uma rampa (`rampTo`). */
   endBpm?: number;
+  /** Rampa de andamento da passada (`beats` = tempos até o fim dela): o BPM varia linearmente de `from` a `to`. */
+  ramp?: { beats: number; from: number; to: number };
   bassInstrument?: InstrumentId;
   drone?: boolean;
   /** Evento da casa 2: `chordIndex` indexa `block.ending`, não `block.chords`. */
@@ -204,6 +206,7 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
         bpm: target === undefined ? bpm : rampBpmAt(passTotal, bpm, target, blockBeat),
         endBpm: target === undefined ? bpm : rampBpmAt(passTotal, bpm, target, blockBeat + beats),
         meter,
+        ...(target === undefined ? {} : { ramp: { beats: passTotal, from: bpm, to: target } }),
         pattern: block.pattern ?? song.pattern,
         instrument: block.instrument ?? song.instrument,
         ...(inEnding ? { inEnding: true } : {}),

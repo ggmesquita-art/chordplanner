@@ -151,3 +151,16 @@ describe("ponto de nota em comum", () => {
     for (const n of ["Lá menor", "Sol maior", "Lá maior", "Lá diminuto"]) expect(dot(n), n).toBeNull();
   });
 });
+
+describe("bloco com tonalidade própria e sem tônica global", () => {
+  it("clicar numa fatia adiciona o acorde (não define a tônica)", () => {
+    const st = useStore.getState();
+    st.setBlockProps(st.song.blocks[st.song.arrangement[0].blockId].id, { key: { tonic: 0, scaleId: "major" } });
+    render(<App />);
+    expect(useStore.getState().tonic).toBeNull();
+    fireEvent.click(slice("Sol maior"));
+    expect(useStore.getState().tonic).toBeNull();
+    const b = useStore.getState().song.blocks[useStore.getState().song.arrangement[0].blockId];
+    expect(b.chords.map((c) => c.root)).toEqual([7]);
+  });
+});

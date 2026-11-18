@@ -8,7 +8,7 @@ vi.mock("../core/voicing", async (orig) => {
 });
 
 import { voiceChord } from "../core/voicing";
-import { renderNotes, type RenderOptions } from "./render";
+import { metronomeClicks, renderNotes, type RenderOptions } from "./render";
 
 const base: RenderOptions = { swing: 0, fitToInstrument: false, humanize: false };
 
@@ -119,5 +119,55 @@ describe("rampa de andamento", () => {
     const ex = expandArrangement(song);
     const notes = renderNotes(ex, base);
     expect(Math.max(...notes.map((n) => n.time))).toBeLessThan(ex.totalSec);
+  });
+});
+
+describe("rampa dentro de um acorde longo", () => {
+  const ramp = (from: number, to: number, patch: Partial<Song> = {}) => expandArrangement(build([16], { bpm: from, ...patch }, { rampTo: to }));
+
+  it("ritardando 120→60: o tempo 8 do metrônomo cai em 16·ln(4/3) s", () => {
+    const clicks = metronomeClicks(ramp(120, 60));
+    expect(clicks[8].time).toBeCloseTo(16 * Math.log(4 / 3), 6);
+    expect(clicks[0].time).toBe(0);
+  });
+
+  it("accelerando 60→120: o tempo 8 cai em 16·ln(3/2) s e o arpejo acompanha", () => {
+    const ex = ramp(60, 120, { pattern: "arp-up" });
+    expect(metronomeClicks(ex)[8].time).toBeCloseTo(16 * Math.log(1.5), 6);
+    expect(ex.totalSec).toBeCloseTo(16 * Math.log(2), 6);
+    // Ataque nº 16 do arpejo = tempo 8.
+    const times = [...new Set(renderNotes(ex, base).map((n) => n.time))].sort((a, b) => a - b);
+    expect(times[16]).toBeCloseTo(16 * Math.log(1.5), 6);
+  });
+
+  it("nenhuma nota nem clique depois de totalSec, em ritardando e accelerando", () => {
+    for (const [from, to] of [[120, 60], [60, 120]]) {
+      for (const pattern of ["block", "arp-up", "comping"] as const) {
+        const ex = ramp(from, to, { pattern });
+        const notes = renderNotes(ex, { ...base, reattack: true });
+        expect(Math.max(...notes.map((n) => n.time))).toBeLessThan(ex.totalSec);
+        expect(Math.max(...notes.map((n) => n.time + n.duration))).toBeLessThanOrEqual(ex.totalSec + 1e-9);
+        expect(Math.max(...metronomeClicks(ex).map((c) => c.time))).toBeLessThan(ex.totalSec);
+      }
+    }
+  });
+
+  it("re-ataque por compasso segue a rampa", () => {
+    const ex = ramp(60, 120);
+    const times = [...new Set(renderNotes(ex, { ...base, reattack: true }).map((n) => n.time))].sort((a, b) => a - b);
+    expect(times.length).toBe(4);
+    expect(times[1]).toBeCloseTo(16 * Math.log(1.25), 6);
+  });
+});
+
+describe("bordão e baixo na mesma altura", () => {
+  it("fundamental = tônica: o baixo duplicado do acorde é omitido; o bordão fica", () => {
+    const ex = expandArrangement(build([4, 4], {}, { drone: true, instrument: "bagpipe" }));
+    const notes = renderNotes(ex, { ...base, tonicFor: () => 0 });
+    // Acorde 0 (Dó): só o bordão em 36; acorde 1 (Sol): baixo 43 mantido.
+    expect(notes.filter((n) => n.eventIndex === 0 && n.midi === 36).map((n) => n.velocity)).toEqual([0.4]);
+    expect(notes.some((n) => n.isBass && n.midi === 36)).toBe(false);
+    expect(notes.some((n) => n.isBass && n.midi === 43)).toBe(true);
+    expect(notes.filter((n) => n.eventIndex === 0 && n.velocity !== 0.4).length).toBeGreaterThan(0);
   });
 });

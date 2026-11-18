@@ -330,7 +330,7 @@ export function Progression() {
             const st = useStore.getState();
             // @tonejs/midi só é baixado quando alguém exporta.
             void import("../../export/midi").then(({ downloadMidi, songToMidi }) =>
-              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true, tonic: st.tonic }), st.songName),
+              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true, tonicFor: (id) => blockKey(st, st.song.blocks[id])?.tonic ?? null }), st.songName),
             );
           }}
         >

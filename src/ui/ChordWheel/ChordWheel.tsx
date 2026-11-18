@@ -5,7 +5,7 @@ import type { SeventhInfo } from "../../core/diatonic";
 import { chordSymbol } from "../../core/modifiers";
 import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
 import { WHEEL_RINGS, chromaticTitle, extraQualities, hoverChordInfo, sliceClickable, shortScaleName, sliceState, wheelCounts, wheelSlices } from "../../core/view";
-import { useStore } from "../../state/store";
+import { selectEditChords, useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
 import { sharedPitchClasses } from "./shared";
@@ -74,6 +74,7 @@ export function ChordWheel() {
   const playhead = useStore((s) => s.playhead);
   const song = useStore((s) => s.song);
   const block = useBlock();
+  const editChords = useStore(selectEditChords);
   const { setTonic, addChord } = useStore.getState();
   const [hover, setHover] = useState<{ root: PitchClass; quality: QualityId } | null>(null);
   const [suggest, setSuggest] = useState(true);
@@ -142,7 +143,8 @@ export function ChordWheel() {
   // A roda gira para a tônica do BLOCO selecionado (modulação) — ou a global.
   const rotation = useRotation(ctx === null ? 0 : -fifthsPosition(ctx.tonic) * 30);
 
-  const selected = block?.chords.find((c) => c.id === selectedChordId) ?? null;
+  // Em modo casa 2, seleção e "acorde anterior" vêm da lista em edição.
+  const selected = editChords.find((c) => c.id === selectedChordId) ?? null;
   const playing = useMemo(() => {
     if (!playhead) return null;
     const item = song.arrangement[playhead.itemIndex];
@@ -150,26 +152,27 @@ export function ChordWheel() {
   }, [playhead, song]);
 
   const previous = useMemo(() => {
-    if (!block?.chords.length) return null;
-    const i = block.chords.findIndex((c) => c.id === selectedChordId);
-    return block.chords[i >= 0 ? i : block.chords.length - 1];
-  }, [block, selectedChordId]);
+    if (!editChords.length) return null;
+    const i = editChords.findIndex((c) => c.id === selectedChordId);
+    return editChords[i >= 0 ? i : editChords.length - 1];
+  }, [editChords, selectedChordId]);
 
   const slices = useMemo(() => wheelSlices(ctx, mode), [ctx, mode]);
 
   // Próximo acorde: histórico = acordes do bloco até o selecionado (ou o bloco todo).
   const suggestions = useMemo(() => {
     if (!suggest || !ctx || !block) return new Map<string, { weight: number; reason: string }>();
-    const at = block.chords.findIndex((c) => c.id === selectedChordId);
-    const history = at >= 0 ? block.chords.slice(0, at + 1) : block.chords;
+    const at = editChords.findIndex((c) => c.id === selectedChordId);
+    const history = at >= 0 ? editChords.slice(0, at + 1) : editChords;
     return new Map(nextChordSuggestions(ctx, history).map((s) => [`${s.root}-${s.quality}`, s]));
-  }, [suggest, ctx, block, selectedChordId]);
+  }, [suggest, ctx, block, editChords, selectedChordId]);
 
   const activate = (root: PitchClass, quality: QualityId) => {
     // Menu radial: devolve o foco ao badge que o abriu (o menu some ao escolher).
     if (menu) badgeRefs.current.get(menu.root)?.focus();
     setMenu(null);
-    if (tonic === null) {
+    // Sem tonalidade no contexto do bloco (nem a dele nem a global): o clique define a tônica.
+    if (ctx === null) {
       setTonic(root);
       return;
     }
@@ -257,7 +260,8 @@ export function ChordWheel() {
                   <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
                 )}
                 {(() => {
-                  const sg = suggestions.get(`${root}-${ring.quality}`);
+                  // Só em fatias clicáveis no modo atual (Estrito não mostra pontos em fatias bloqueadas).
+                  const sg = can ? suggestions.get(`${root}-${ring.quality}`) : undefined;
                   if (!sg) return null;
                   const [dx, dy] = pt(ring.r0 + 9, angle);
                   return (
@@ -404,7 +408,7 @@ export function DegreeStrip() {
   const ctx = useCtx();
   const spell = useSpeller();
   const soundOnClick = useStore((s) => s.soundOnClick);
-  const { addChord, toggleMod } = useStore.getState();
+  const { addChord } = useStore.getState();
   if (!ctx) return null;
 
   const add = (root: PitchClass, q: QualityId) => {
@@ -413,9 +417,8 @@ export function DegreeStrip() {
   };
 
   const addSeventh = (root: PitchClass, sv: SeventhInfo) => {
-    const chord = addChord(root, sv.quality);
+    const chord = addChord(root, sv.quality, sv.modifiers);
     if (!chord) return;
-    for (const m of sv.modifiers) toggleMod(chord.id, m);
     if (soundOnClick) previewChord({ ...chord, modifiers: sv.modifiers });
   };
 

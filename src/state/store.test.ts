@@ -436,3 +436,95 @@ describe("renameSong", () => {
     expect(selectBlock(useStore.getState())!.ending).toBeUndefined();
   });
 });
+
+describe("casa 2: seleção e clonagem", () => {
+  beforeEach(() => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+  });
+  const enterEnding = () => {
+    useStore.getState().setEditEnding(true);
+    useStore.getState().addChord(7, "maj");
+  };
+
+  it("trocar o bloco selecionado sai do modo casa 2", () => {
+    const ops: [string, () => void][] = [
+      ["addBlock", () => useStore.getState().addBlock()],
+      ["addLinkedInstance", () => useStore.getState().addLinkedInstance(0)],
+      ["applyTemplate", () => useStore.getState().applyTemplate("pop")],
+    ];
+    for (const [name, op] of ops) {
+      useStore.getState().newSong();
+      useStore.getState().setTonic(0);
+      enterEnding();
+      expect(useStore.getState().editEnding, name).toBe(true);
+      op();
+      expect(useStore.getState().editEnding, name).toBe(false);
+    }
+  });
+
+  it("removeItem, moveItem e desfazer saem da casa 2 quando o bloco muda", () => {
+    useStore.getState().addBlock();
+    useStore.getState().selectItem(1);
+    enterEnding();
+    useStore.getState().removeItem(1);
+    expect(useStore.getState().editEnding).toBe(false);
+
+    useStore.getState().addBlock(); // seleciona o item 1
+    useStore.getState().selectItem(0);
+    useStore.getState().setEditEnding(true);
+    useStore.getState().moveItem(0, 1);
+    expect(useStore.getState().editEnding).toBe(false);
+
+    useStore.getState().newSong();
+    useStore.getState().setTonic(0);
+    useStore.getState().addBlock(); // histórico: seleção no item 1
+    useStore.getState().selectItem(1);
+    useStore.getState().setEditEnding(true);
+    useStore.getState().undo(); // volta a ter 1 item: bloco selecionado muda
+    expect(useStore.getState().selectedItem).toBe(0);
+    expect(useStore.getState().editEnding).toBe(false);
+  });
+
+  it("completeBar completa a casa 2 quando ela está em edição", () => {
+    useStore.getState().setEditEnding(true);
+    useStore.getState().addChord(7, "maj");
+    const id = selectBlock(useStore.getState())!.ending![0].id;
+    useStore.getState().setDuration(id, 3);
+    useStore.getState().completeBar();
+    const b = selectBlock(useStore.getState())!;
+    expect(b.ending![0].duration).toBe(4);
+    expect(b.chords[0].duration).toBe(4);
+  });
+
+  it("Tornar único copia a casa 2 com ids novos; o hash ignora esses ids", () => {
+    enterEnding();
+    useStore.getState().setEditEnding(false);
+    useStore.getState().addLinkedInstance(0);
+    useStore.getState().makeUnique(1);
+    const { song } = useStore.getState();
+    const blocks = Object.values(song.blocks);
+    const ids = blocks.flatMap((b) => [...b.chords, ...(b.ending ?? [])].map((c) => c.id));
+    expect(blocks.every((b) => b.ending?.length === 1)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+    const s = useStore.getState();
+    const content = { scaleId: s.scaleId, tonic: s.tonic, song: s.song };
+    const reloaded = sanitizeContent(JSON.parse(JSON.stringify(content)))!;
+    expect(contentHash(reloaded)).toBe(contentHash(content));
+    const other = structuredClone(content);
+    for (const b of Object.values(other.song.blocks)) b.ending![0].id = "outro";
+    expect(contentHash(other)).toBe(contentHash(content));
+  });
+
+  it("addChord com modificadores: um único passo de desfazer", () => {
+    const before = useStore.getState().past.length;
+    useStore.getState().addChord(7, "maj", [{ kind: "ext", value: 7 }]);
+    expect(useStore.getState().past.length).toBe(before + 1);
+    expect(chordsOf().at(-1)!.modifiers).toEqual([{ kind: "ext", value: 7 }]);
+    useStore.getState().undo();
+    expect(chordsOf().map((c) => c.root)).toEqual([0]);
+  });
+});
+
+const chordsOf = () => selectBlock(useStore.getState())!.chords;

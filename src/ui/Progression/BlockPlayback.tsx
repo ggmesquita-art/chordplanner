@@ -1,3 +1,4 @@
+import { preload } from "../../audio/engine";
 import { CATEGORY_NAMES, INSTRUMENTS, getInstrumentDef, type InstrumentCategory } from "../../audio/instruments";
 import { useStore } from "../../state/store";
 import { NumberField } from "../NumberField";
@@ -19,7 +20,10 @@ export function BlockPlayback({ blockId }: { blockId: string }) {
     <div className="block-overrides small">
       <label className="field small" title="Camada de baixo com instrumento próprio: toca a fundamental (ou o baixo invertido)">
         Baixo
-        <select value={block.bassInstrument ?? ""} onChange={(e) => setBlockProps(blockId, { bassInstrument: e.target.value || undefined })} aria-label="Instrumento do baixo do bloco">
+        <select value={block.bassInstrument ?? ""} onChange={(e) => {
+            if (e.target.value) preload(e.target.value);
+            setBlockProps(blockId, { bassInstrument: e.target.value || undefined });
+          }} aria-label="Instrumento do baixo do bloco">
           <option value="">— sem camada</option>
           {CATEGORIES.map((cat) => (
             <optgroup key={cat} label={CATEGORY_NAMES[cat]}>

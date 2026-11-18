@@ -65,7 +65,39 @@ describe("sugestões na roda", () => {
   });
 });
 
+describe("sugestões na roda: modo e casa 2", () => {
+  it("no Estrito não há ponto em fatia bloqueada (♭VII depois de ♭VI só no Colorido)", () => {
+    act(() => {
+      const st = useStore.getState();
+      st.removeChord(selectBlock(st)!.chords[0].id);
+      useStore.getState().addChord(8, "maj");
+    });
+    const { container, rerender } = render(<ChordWheel />);
+    const colorful = container.querySelectorAll(".suggest-dot").length;
+    expect(Array.from(container.querySelectorAll(".suggest-dot")).some((d) => !d.closest(".slice")?.classList.contains("can"))).toBe(false);
+    act(() => useStore.getState().setMode("strict"));
+    rerender(<ChordWheel />);
+    expect(container.querySelectorAll(".suggest-dot").length).toBeLessThan(colorful);
+    for (const dot of container.querySelectorAll(".suggest-dot")) expect(dot.closest(".slice")?.classList.contains("can")).toBe(true);
+  });
+
+  it("na casa 2 o histórico vem dos acordes da casa 2", () => {
+    act(() => useStore.getState().setEditEnding(true));
+    const { container } = render(<ChordWheel />);
+    // Casa 2 vazia = início de progressão: sugere a tônica (com os acordes do bloco, não sugeriria Dó maior).
+    const dots = Array.from(container.querySelectorAll(".suggest-dot title")).map((t) => t.textContent);
+    expect(dots).toContain("Sugestão: tônica");
+  });
+});
+
 describe("sétimas na lista por graus", () => {
+  it("um único desfazer remove o acorde com sétima inteiro", () => {
+    render(<DegreeStrip />);
+    fireEvent.click(screen.getByText("G7"));
+    act(() => useStore.getState().undo());
+    expect(selectBlock(useStore.getState())!.chords.map((c) => c.root)).toEqual([0]);
+  });
+
   it("clicar no chip G7 adiciona o acorde com o modificador 7", () => {
     render(<DegreeStrip />);
     fireEvent.click(screen.getByText("G7"));

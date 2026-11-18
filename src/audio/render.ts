@@ -3,7 +3,7 @@
 // saída MIDI e pelo export .mid — assim o arquivo soa como o que se ouve.
 
 import type { Expanded, PlaybackPattern, TimedChord } from "../core/song";
-import { barLinesWithin, isCompound, secondsPerBeat, swingOffset } from "../core/timeline";
+import { barLinesWithin, isCompound, rampSeconds, secondsPerBeat, swingOffset } from "../core/timeline";
 import { fitToRange, voiceChord } from "../core/voicing";
 import { getInstrumentDef, type InstrumentDef } from "./instruments";
 
@@ -43,10 +43,17 @@ export type RenderOptions = {
 export type PlaybackExtras = Pick<RenderOptions, "tonicFor" | "reattack" | "voiceLeading">;
 
 /**
- * Segundos por tempo dentro do acorde. Numa rampa de andamento usa a média do acorde
- * (aproximação: subdivisões e cliques ficam uniformes dentro do acorde); fora dela, o BPM do acorde.
+ * Posição absoluta (segundos) do tempo `beatOffset` dentro do acorde (offset em tempos desde o início
+ * dele; pode passar de `beats`). Numa rampa de andamento integra o BPM linear com `rampSeconds`.
  */
-const localSpb = (ev: TimedChord) => (ev.endBpm !== undefined && ev.endBpm !== ev.bpm ? ev.durationSec / ev.beats : 60 / ev.bpm);
+function secAt(ev: TimedChord, beatOffset: number): number {
+  if (!ev.ramp) return ev.startSec + beatOffset * (60 / ev.bpm);
+  const { beats, from, to } = ev.ramp;
+  return ev.startSec + rampSeconds(beats, from, to, ev.blockBeat, ev.blockBeat + beatOffset);
+}
+
+/** Duração (segundos) de `len` tempos que começam em `beatOffset` dentro do acorde. */
+const spanSec = (ev: TimedChord, beatOffset: number, len: number) => secAt(ev, beatOffset + len) - secAt(ev, beatOffset);
 
 const DRONE_BASE = 36; // C2
 const DRONE_VELOCITY = 0.4;
@@ -98,17 +105,28 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
 
     // Camada de baixo: a nota grave do voicing sai no instrumento próprio; o resto, no do acorde.
     const layerDef = ev.bassInstrument && voiced.length > 1 ? getInstrumentDef(ev.bassInstrument) : null;
-    const layerNote = layerDef ? (opts.fitToInstrument ? fitToRange([voiced[0]], layerDef.range).notes[0] : voiced[0]) : undefined;
+    const layerNote0 = layerDef ? (opts.fitToInstrument ? fitToRange([voiced[0]], layerDef.range).notes[0] : voiced[0]) : undefined;
     const upper = layerDef ? voiced.slice(1) : voiced;
-    const notes = opts.fitToInstrument ? fitToRange(upper, def.range).notes : upper;
+    const notes0 = opts.fitToInstrument ? fitToRange(upper, def.range).notes : upper;
+    if (!notes0.length && layerNote0 === undefined) return;
+    // Bordão na mesma altura do baixo: o note-off de um cortaria o outro (MIDI). Mantém o bordão e
+    // omite o baixo duplicado deste acorde.
+    const droneMidi = droneMidiFor(ev, opts);
+    let notes = notes0;
+    let layerNote = layerNote0;
+    let bassDropped = false;
+    if (layerNote !== undefined && layerNote === droneMidi) layerNote = undefined;
+    if (!layerDef && voiced.length > 1 && notes.length > 1 && notes[0] === droneMidi) {
+      notes = notes.slice(1);
+      bassDropped = true;
+    }
     if (!notes.length && layerNote === undefined) return;
-    const bass = !layerDef && voiced.length > 1 ? notes[0] : null;
-    const spb = localSpb(ev);
+    const bass = !layerDef && voiced.length > 1 && !bassDropped ? notes[0] : null;
     const channel = opts.channelFor?.(ev.blockId) ?? 1;
     const pattern: PlaybackPattern = opts.fitToInstrument && def.polyphony === "mono" && ev.pattern === "block" ? "arp-up" : ev.pattern;
     const strum = opts.humanize ? strumFor(def) : 0;
     const push = (hits: Hit[]) => hits.forEach((h) => out.push({ ...h, channel, isBass: h.midi === bass, eventIndex, instrument: ev.instrument }));
-    const at = (beat: number) => ev.startSec + beat * spb;
+    const at = (beat: number) => secAt(ev, beat);
 
     if (layerNote !== undefined && ev.bassInstrument) {
       // Uma vez por acorde, no início, sustentado até o fim.
@@ -125,16 +143,17 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
       } else {
         const edges = [0, ...cuts, ev.beats];
         for (let i = 0; i < edges.length - 1; i++) {
-          push(strike(notes, at(edges[i]), (edges[i + 1] - edges[i]) * spb * 0.97, i === 0 ? 0.75 : REATTACK_VELOCITY, strum, opts.humanize, rng));
+          push(strike(notes, at(edges[i]), spanSec(ev, edges[i], edges[i + 1] - edges[i]) * 0.97, i === 0 ? 0.75 : REATTACK_VELOCITY, strum, opts.humanize, rng));
         }
       }
     } else if (pattern === "arp-up" || pattern === "arp-down") {
       const seq = pattern === "arp-up" ? notes : [...notes].reverse();
       const steps = Math.max(1, Math.floor(ev.beats / 0.5));
-      const ring = opts.fitToInstrument && def.envelope === "decay" ? spb : 0.5 * spb * 0.92;
       for (let k = 0; k < steps; k++) {
+        const t0 = k * 0.5 + swingOffset(opts.swing, k);
+        const ring = opts.fitToInstrument && def.envelope === "decay" ? spanSec(ev, k * 0.5, 1) : spanSec(ev, k * 0.5, 0.5) * 0.92;
         const velocity = (k % 2 === 0 ? 0.72 : 0.6) + (opts.humanize ? (rng() - 0.5) * 0.06 : 0);
-        push([{ midi: seq[k % seq.length], time: at(k * 0.5 + swingOffset(opts.swing, k)), duration: ring, velocity }]);
+        push([{ midi: seq[k % seq.length], time: at(t0), duration: ring, velocity }]);
       }
     } else {
       // Comping: 1, "e" do 2, 3, "e" do 4 (em janelas de 4 tempos).
@@ -142,7 +161,7 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
         for (const off of [0, 1.5, 2, 3.5]) {
           if (b + off >= ev.beats) continue;
           const eighth = Math.round((b + off) / 0.5);
-          push(strike(notes, at(b + off + swingOffset(opts.swing, eighth)), 0.45 * spb, off % 1 ? 0.55 : 0.7, strum, opts.humanize, rng));
+          push(strike(notes, at(b + off + swingOffset(opts.swing, eighth)), spanSec(ev, b + off, 0.45), off % 1 ? 0.55 : 0.7, strum, opts.humanize, rng));
         }
       }
     }
@@ -150,6 +169,15 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
 
   renderDrones(expanded, opts, out);
   return out;
+}
+
+/** Altura do bordão do evento (ajustada à tessitura se pedido); undefined = sem bordão. */
+function droneMidiFor(ev: TimedChord, opts: RenderOptions): number | undefined {
+  const def = getInstrumentDef(ev.instrument);
+  if (!ev.drone || !def.drone) return undefined;
+  const tonic = opts.tonicFor?.(ev.blockId);
+  if (tonic === null || tonic === undefined) return undefined;
+  return opts.fitToInstrument ? fitToRange([DRONE_BASE + tonic], def.range).notes[0] : DRONE_BASE + tonic;
 }
 
 /**
@@ -167,24 +195,21 @@ function renderDrones(expanded: Expanded, opts: RenderOptions, out: NoteEvent[])
     i = j + 1;
 
     const def = getInstrumentDef(first.instrument);
-    if (!first.drone || !def.drone) continue;
-    const tonic = opts.tonicFor?.(first.blockId);
-    if (tonic === null || tonic === undefined) continue;
-    const midi = opts.fitToInstrument ? fitToRange([DRONE_BASE + tonic], def.range).notes[0] : DRONE_BASE + tonic;
+    const midi = droneMidiFor(first, opts);
     if (midi === undefined) continue;
 
     const lastEv = group[group.length - 1];
     const endBeat = lastEv.blockBeat + lastEv.beats;
-    const secAt = (beat: number) => {
+    const posSec = (beat: number) => {
       const ev = group.find((e) => beat <= e.blockBeat + e.beats + 1e-9) ?? lastEv;
-      return ev.startSec + (beat - ev.blockBeat) * localSpb(ev);
+      return secAt(ev, beat - ev.blockBeat);
     };
     const cuts = def.envelope === "decay" ? barLinesWithin(first.blockBeat, endBeat - first.blockBeat, first.meter).map((o) => first.blockBeat + o) : [];
     const edges = [first.blockBeat, ...cuts, endBeat];
     const channel = opts.channelFor?.(first.blockId) ?? 1;
     for (let k = 0; k < edges.length - 1; k++) {
-      const time = secAt(edges[k]);
-      out.push({ midi, time, duration: secAt(edges[k + 1]) - time, velocity: DRONE_VELOCITY, channel, isBass: false, eventIndex, instrument: first.instrument });
+      const time = posSec(edges[k]);
+      out.push({ midi, time, duration: posSec(edges[k + 1]) - time, velocity: DRONE_VELOCITY, channel, isBass: false, eventIndex, instrument: first.instrument });
     }
   }
 }
@@ -199,14 +224,13 @@ export type CountInClick = { time: number; accent: boolean };
 export function metronomeClicks(expanded: Expanded): CountInClick[] {
   const clicks: CountInClick[] = [];
   for (const ev of expanded.events) {
-    const spb = localSpb(ev);
     const step = isCompound(ev.meter) ? 3 : 1;
     const first = ev.blockBeat;
     // Cliques nos tempos inteiros da grade do bloco que caem dentro do acorde (acordes de ½ tempo
     // podem deslocar o início do acorde para fora da grade).
     for (let k = Math.ceil(first - BEAT_EPS); k < first + ev.beats - BEAT_EPS; k++) {
       if (k % step !== 0) continue;
-      clicks.push({ time: ev.startSec + (k - first) * spb, accent: k % ev.meter[0] === 0 });
+      clicks.push({ time: secAt(ev, k - first), accent: k % ev.meter[0] === 0 });
     }
   }
   return clicks;

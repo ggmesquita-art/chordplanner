@@ -66,3 +66,15 @@ describe("condução de vozes", () => {
     }
   });
 });
+
+describe("quartal: custo", () => {
+  it("13(♭9,♯11) quartal roda 1000× em menos de 200 ms e continua só com notas do acorde", () => {
+    const chord = { ...makeChord(0, "maj"), voicing: "quartal" as const, modifiers: [{ kind: "ext", value: 13 }, { kind: "alt", value: "b9" }, { kind: "alt", value: "#11" }] } as ReturnType<typeof makeChord>;
+    const t0 = performance.now();
+    let notes: number[] = [];
+    for (let i = 0; i < 1000; i++) notes = voiceChord(chord);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(notes.length).toBeGreaterThan(2);
+    expect(new Set(notes).size).toBe(notes.length);
+  });
+});

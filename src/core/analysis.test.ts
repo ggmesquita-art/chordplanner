@@ -68,6 +68,18 @@ describe("sugestões do próximo acorde", () => {
     expect(s[0]).toMatchObject({ root: 7, quality: "maj" });
   });
 
+  it("depois de A maior (V/ii) a primeira sugestão é Dm, e D maior não empata", () => {
+    const s = nextChordSuggestions(C, h([9, "maj"]), 36);
+    expect(s[0]).toMatchObject({ root: 2, quality: "m" });
+    expect(s.find((x) => x.root === 2 && x.quality === "maj")?.weight ?? 0).toBeLessThan(0.85);
+  });
+
+  it("depois de subV (D♭ em Dó) só a tríade da tônica resolve", () => {
+    const s = nextChordSuggestions(C, h([1, "maj"]), 36);
+    expect(s[0]).toMatchObject({ root: 0, quality: "maj" });
+    expect(s.find((x) => x.root === 0 && x.quality === "m")?.weight ?? 0).toBeLessThan(0.85);
+  });
+
   it("nunca sugere nada que o Colorido não libere", () => {
     for (const ctx of [C, Am, scaleContext(2, "dorian")]) {
       for (const root of [0, 2, 4, 7, 9, 11]) {

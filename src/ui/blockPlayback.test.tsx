@@ -13,6 +13,7 @@ vi.mock("../audio/engine", () => ({
   instrumentProgress: () => null,
 }));
 
+import { preload } from "../audio/engine";
 import { selectBlock, useStore } from "../state/store";
 import { BlockPlayback } from "./Progression/BlockPlayback";
 
@@ -27,6 +28,7 @@ describe("BlockPlayback", () => {
     render(<BlockPlayback blockId={blockId()} />);
     fireEvent.change(screen.getByLabelText("Instrumento do baixo do bloco"), { target: { value: "contrabass-pizz" } });
     expect(block().bassInstrument).toBe("contrabass-pizz");
+    expect(preload).toHaveBeenCalledWith("contrabass-pizz");
     fireEvent.change(screen.getByLabelText("Instrumento do baixo do bloco"), { target: { value: "" } });
     expect(block().bassInstrument).toBeUndefined();
     const ramp = screen.getByLabelText("BPM ao fim do bloco");

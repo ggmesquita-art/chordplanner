@@ -41,7 +41,7 @@ export const contentHash = (s: { song: Song; scaleId: string; tonic: number | nu
     s.tonic,
     {
       ...s.song,
-      blocks: Object.fromEntries(Object.entries(s.song.blocks).map(([k, b]) => [k, { ...b, chords: b.chords.map(({ id: _id, ...c }) => c) }])),
+      blocks: Object.fromEntries(Object.entries(s.song.blocks).map(([k, b]) => [k, { ...b, chords: b.chords.map(({ id: _id, ...c }) => c), ...(b.ending ? { ending: b.ending.map(({ id: _id, ...c }) => c) } : {}) }])),
       arrangement: s.song.arrangement.map(({ id: _id, ...it }) => it),
     },
   ]);
@@ -122,7 +122,8 @@ type Actions = {
   setFollowPlayback: (v: boolean) => void;
   setMidi: (patch: Partial<MidiSettings>) => void;
 
-  addChord: (root: PitchClass, quality: QualityId) => Chord | null;
+  /** `modifiers` já entram no acorde criado (um único passo de desfazer). */
+  addChord: (root: PitchClass, quality: QualityId, modifiers?: Modifier[]) => Chord | null;
   selectChord: (id: string | null) => void;
   removeChord: (id: string) => void;
   duplicateChord: (id: string) => void;
@@ -275,16 +276,18 @@ function tonicChordFor(s: Pick<State, "tonic" | "scaleId" | "song">, block: Bloc
 }
 
 function cloneBlock(b: Block, name: string): Block {
-  return { ...structuredClone(b), id: newId("b"), name, chords: b.chords.map((c) => ({ ...structuredClone(c), id: newChordId() })) };
+  const fresh = (list: Chord[]) => list.map((c) => ({ ...structuredClone(c), id: newChordId() }));
+  return { ...structuredClone(b), id: newId("b"), name, chords: fresh(b.chords), ...(b.ending ? { ending: fresh(b.ending) } : {}) };
 }
 
-/** Ajusta a seleção ao restaurar uma música: bloco existente e acorde ainda presente. */
-function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord" | "regionEnd"> {
+/** Ajusta a seleção ao restaurar uma música: bloco existente e acorde ainda presente; sai da casa 2 se o bloco mudou. */
+function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord" | "regionEnd" | "editEnding"> {
   const selectedItem = Math.max(0, Math.min(s.selectedItem, song.arrangement.length - 1));
   const block = selectBlock({ song, selectedItem });
-  const list = s.editEnding ? (block?.ending ?? []) : (block?.chords ?? []);
+  const editEnding = s.editEnding && block?.id === selectBlock(s)?.id;
+  const list = editEnding ? (block?.ending ?? []) : (block?.chords ?? []);
   const keep = s.selectedChord !== null && list.some((c) => c.id === s.selectedChord);
-  return { selectedItem, selectedChord: keep ? s.selectedChord : null, regionEnd: null };
+  return { selectedItem, selectedChord: keep ? s.selectedChord : null, regionEnd: null, editEnding };
 }
 
 export const useStore = create<Store>()((set, get) => {
@@ -304,11 +307,16 @@ export const useStore = create<Store>()((set, get) => {
     const merge = !!opts?.coalesce && mark?.key === opts.coalesce && mark.song === s.song && now - mark.at < 1000 && s.past.length > 0;
     mark = opts?.coalesce ? { key: opts.coalesce, at: merge ? mark!.at : now, song: next } : null;
     const prev: Snapshot = { song: s.song, tonic: s.tonic, scaleId: s.scaleId };
+    // Trocar o bloco selecionado sai do modo casa 2 (a menos que a ação diga outra coisa).
+    const blockChanged =
+      extra.selectedItem !== undefined &&
+      (extra.selectedItem !== s.selectedItem || next.arrangement[extra.selectedItem]?.blockId !== currentBlock(s.song, s)?.id);
     // Uma edição que muda o acorde selecionado desfaz a região (ela parte da seleção).
     set({
       song: next,
       ...(merge ? {} : { past: [...s.past, prev].slice(-HISTORY_LIMIT) }),
       future: [],
+      ...(blockChanged ? { editEnding: false } : {}),
       ...extra,
       ...("selectedChord" in extra ? { regionEnd: null } : {}),
     });
@@ -413,11 +421,12 @@ export const useStore = create<Store>()((set, get) => {
     setFollowPlayback: (followPlayback) => set({ followPlayback }),
     setMidi: (patch) => set({ midi: { ...get().midi, ...patch } }),
 
-    addChord: (root, quality) => {
+    addChord: (root, quality, modifiers) => {
       const s = get();
       const block = selectBlock(s);
       if (!block) return null;
       const chord = makeChord(root, quality, (block.meter ?? s.song.meter)[0]);
+      if (modifiers?.length) chord.modifiers = structuredClone(modifiers);
       commit(
         (song, st) => {
           const list = editList(song, st, true)!;
@@ -495,11 +504,13 @@ export const useStore = create<Store>()((set, get) => {
     completeBar: () =>
       commit((song, s) => {
         const b = currentBlock(song, s);
-        if (!b?.chords.length) return;
+        const list = editList(song, s);
+        if (!b || !list?.length) return;
         const per = (b.meter ?? song.meter)[0];
-        const total = b.chords.reduce((n, c) => n + c.duration, 0);
+        const total = list.reduce((n, c) => n + c.duration, 0);
         const rest = total % per;
-        if (rest) b.chords[b.chords.length - 1].duration += per - rest;
+        if (rest) list[list.length - 1].duration += per - rest;
+        tidyEnding(song, s);
       }),
 
     applyPreset: (preset) =>

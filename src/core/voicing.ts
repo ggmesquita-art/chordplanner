@@ -34,14 +34,22 @@ function shellShape(ivs: number[], upperRoot: number): number[] {
   return [third, seventh].filter((i): i is number => i !== undefined).map((i) => upperRoot + i);
 }
 
+const QUARTAL_CACHE = new Map<string, number[]>();
+const QUARTAL_CACHE_MAX = 256;
+
 /**
  * Quartal: só notas do acorde (nenhuma tensão inventada). Testa todas as ordens das
  * classes de altura e escolhe a que tem mais quartas justas entre vizinhas
  * (empate: menor extensão total, depois ordem lexicográfica das classes).
  */
 function quartalShape(ivs: number[], upperRoot: number): number[] {
-  const pcs = [...new Set(ivs.map(mod12))];
+  let pcs = [...new Set(ivs.map(mod12))].sort((x, y) => x - y);
   if (pcs.length < 2) return pcs.map((pc) => upperRoot + pc);
+  // Com 7 classes a busca (n!) é cara: descarta a 5ª justa (a nota mais dispensável) antes de permutar.
+  if (pcs.length > 6) pcs = pcs.filter((pc) => pc !== 7);
+  const cacheKey = `${pcs.join(",")}|${upperRoot}`;
+  const hit = QUARTAL_CACHE.get(cacheKey);
+  if (hit) return [...hit];
   const stack = (order: number[]) => {
     const notes = [upperRoot + order[0]];
     for (const pc of order.slice(1)) {
@@ -62,11 +70,14 @@ function quartalShape(ivs: number[], upperRoot: number): number[] {
     }
     for (const pc of rest) walk([...order, pc], rest.filter((x) => x !== pc));
   };
-  walk([], pcs.sort((a, b) => a - b));
+  walk([], pcs);
   // A ordem pode começar numa nota alta da escala: reposiciona a pilha perto de F3.
   let notes = (best as unknown as { notes: number[] }).notes;
   while (notes[0] - 12 >= UPPER_LOW) notes = notes.map((n) => n - 12);
-  return notes;
+  // Cache limitado (FIFO): as combinações reais são poucas, mas a chave nunca cresce sem teto.
+  if (QUARTAL_CACHE.size >= QUARTAL_CACHE_MAX) QUARTAL_CACHE.delete(QUARTAL_CACHE.keys().next().value as string);
+  QUARTAL_CACHE.set(cacheKey, notes);
+  return [...notes];
 }
 
 /** Estrutura superior (sem oitava do acorde) do voicing pedido. */

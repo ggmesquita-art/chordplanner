@@ -11,7 +11,7 @@
 // empréstimos modais → pela tabela acima. Acorde fora da escala e sem função idiomática → null.
 
 import type { Chord, QualityId } from "./chords";
-import { chordFits, chromaticFunction, type ScaleContext } from "./diatonic";
+import { chordFits, chromaticFunction, tonicChord, type ScaleContext } from "./diatonic";
 import { mod12, type PitchClass } from "./pitch";
 import { WHEEL_RINGS, sliceClickable, sliceState } from "./view";
 
@@ -145,8 +145,10 @@ export function nextChordSuggestions(ctx: ScaleContext, history: Chord[], max = 
         if (!best || weight > best.weight) best = { weight, reason };
       };
       for (const r of applicable) if (matches(r.to, step, quality)) offer(r.weight, r.reason);
-      if (lastChromatic?.kind === "secondary" && root === mod12(last!.root + 5)) offer(0.85, `resolve ${lastChromatic.label}`);
-      if (lastChromatic?.kind === "subV" && root === mod12(last!.root - 1)) offer(0.85, "subV → tônica");
+      // Só a qualidade primária do grau-alvo (D maior não empata com Dm depois de A maior em Dó).
+      const primaryAt = ctx.degrees.find((d) => d.root === root)?.primary;
+      if (lastChromatic?.kind === "secondary" && root === mod12(last!.root + 5) && quality === primaryAt) offer(0.85, `resolve ${lastChromatic.label}`);
+      if (lastChromatic?.kind === "subV" && root === mod12(last!.root - 1) && quality === tonicChord(ctx)) offer(0.85, "subV → tônica");
       if (lastChromatic?.kind === "supertonic" && quality === "maj" && root === mod12(last!.root + 5)) offer(0.75, "ii–V secundário");
       if (lastFn && chordFits(root, quality, ctx.pcSet)) {
         const next = NEXT_FUNCTION[lastFn];

@@ -14,8 +14,8 @@ export type MidiExportOptions = {
   channel: number;
   /** Separa o baixo do voicing numa trilha própria. */
   splitBass: boolean;
-  /** Tônica global (pitch class) para o bordão; sem ela, blocos com bordão não o exportam. */
-  tonic?: number | null;
+  /** Tônica (pitch class) do bloco para o bordão (respeita a tonalidade própria do bloco); sem ela, o bloco não exporta bordão. */
+  tonicFor?: (blockId: string) => number | null;
 };
 
 export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
@@ -66,7 +66,7 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
     // A música manda: condução de vozes e re-ataque seguem o que está salvo nela.
     voiceLeading: song.voiceLeading,
     reattack: song.reattack,
-    tonicFor: () => opts.tonic ?? null,
+    tonicFor: opts.tonicFor,
   });
 
   const tracks = new Map<string, ReturnType<Midi["addTrack"]>>();
