@@ -15,7 +15,9 @@ import {
 import { chordNoteList, currentInversion, midiStatus, voicedInRange } from "../../core/view";
 import { selectChord, useStore } from "../../state/store";
 import { currentInstrument, previewChord, useBlock, useCtx, useSpeller } from "../hooks";
+import { Fretboard } from "../Fretboard/Fretboard";
 import { MiniKeyboard } from "../MiniKeyboard/MiniKeyboard";
+import { Segmented } from "../Segmented";
 
 type Group = { title: string; items: [Modifier, string][] };
 
@@ -77,6 +79,7 @@ export function ModifierPanel() {
   const chord = useStore((s) => selectChord(s));
   const block = useBlock();
   const mode = useStore((s) => s.mode);
+  const view = useStore((s) => s.instrumentView);
   const ctx = useCtx();
   const spell = useSpeller();
   const actions = useStore.getState();
@@ -269,8 +272,22 @@ export function ModifierPanel() {
         </span>
       </div>
 
-      <MiniKeyboard notes={voiced.notes} status={(midi) => midiStatus(resolved, midi)} />
-      {voiced.dropped > 0 && <div className="warn small">⚠ {voiced.dropped} nota(s) fora da tessitura de {def.name}.</div>}
+      <Segmented
+        small
+        label="Visualização do voicing"
+        value={view}
+        options={[
+          { value: "keyboard", text: "Teclado" },
+          { value: "guitar", text: "Violão" },
+        ]}
+        onChange={actions.setInstrumentView}
+      />
+      {view === "guitar" ? (
+        <Fretboard chord={chord} resolved={resolved} />
+      ) : (
+        <MiniKeyboard notes={voiced.notes} status={(midi) => midiStatus(resolved, midi)} />
+      )}
+      {view === "keyboard" && voiced.dropped > 0 && <div className="warn small">⚠ {voiced.dropped} nota(s) fora da tessitura de {def.name}.</div>}
 
       <Presets />
     </section>

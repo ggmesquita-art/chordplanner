@@ -228,3 +228,16 @@ export function chromaticTitle(c: ChromaticFunction, withLabel: boolean): string
   if (c.kind === "subV") return `Substituto de trítono da dominante${tag} (resolve meio tom abaixo, em ${c.target})`;
   return `Empréstimo modal de ${c.from}${tag}`;
 }
+
+// ---------- Modulação por bloco ----------
+
+/** Nome curto da escala, sem o parêntese ("Jônio (Maior)" → "Jônio"). */
+export const shortScaleName = (scaleId: string): string => getScale(scaleId).name.replace(/ \(.*\)/, "");
+
+/** Rótulo de tonalidade: tônica grafada pela escala + nome curto ("E Dórico"); sem tônica, só a escala. */
+export function keyLabel(tonic: PitchClass | null, scaleId: string, accidentals: AccidentalPref): string {
+  const scale = getScale(scaleId);
+  if (tonic === null) return scale.name;
+  const spell = makeSpeller(tonic, pitchSet(tonic, scale), accidentals);
+  return `${spell(tonic)} ${shortScaleName(scaleId)}`;
+}

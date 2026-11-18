@@ -15,6 +15,7 @@ import {
   droppedByChord,
   extraQualities,
   hoverChordInfo,
+  keyLabel,
   midiStatus,
   previewChordNotes,
   relativeTonic,
@@ -213,5 +214,17 @@ describe("arranjo", () => {
     const song = makeSong();
     song.arrangement = [];
     expect(arrangementLayout(song)).toEqual({ entries: [], end: 1 });
+  });
+});
+
+describe("keyLabel", () => {
+  it("tônica grafada pela escala + nome curto", () => {
+    expect(keyLabel(4, "dorian", "auto")).toBe("E Dórico");
+    expect(keyLabel(0, "major", "auto")).toBe("C Jônio");
+  });
+  it("bemóis quando a escala pede e sem tônica devolve o nome completo", () => {
+    expect(keyLabel(5, "major", "auto")).toBe("F Jônio");
+    expect(keyLabel(10, "major", "auto")).toBe("B♭ Jônio");
+    expect(keyLabel(null, "major", "auto")).toBe("Jônio (Maior)");
   });
 });

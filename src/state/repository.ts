@@ -30,6 +30,8 @@ export type Session = {
   showDegrees?: boolean;
   /** Tocar o acorde ao pousar o mouse numa fatia da roda. */
   soundOnHover?: boolean;
+  /** Visualização do voicing no painel de modificadores. */
+  instrumentView?: "keyboard" | "guitar";
   theme?: Theme;
   midi?: MidiSettings;
   song: Song;
@@ -136,6 +138,7 @@ export class LocalSongRepository implements SongRepository {
         grid: GRIDS.find((g) => g === p.grid) ?? 1,
         showDegrees: bool(p.showDegrees, true),
         soundOnHover: bool(p.soundOnHover, false),
+        instrumentView: p.instrumentView === "guitar" ? "guitar" : "keyboard",
         theme: THEMES.find((t) => t === p.theme) ?? "auto",
         midi: typeof p.midi === "object" && p.midi !== null ? (p.midi as MidiSettings) : undefined,
         songId: typeof p.songId === "string" ? p.songId : null,

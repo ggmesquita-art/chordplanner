@@ -322,7 +322,7 @@ describe("tempo e arranjo (§3.8)", () => {
       { ...makeChord(0, "maj", 8), modifiers: [{ kind: "ext", value: "maj7" }] },
     ];
     song.arrangement[0].repeat = 2;
-    expect(songToText(song, sharpSpell)).toBe("[Verso A ×2]  4/4 ♩=90\n| Dm7 | G7 | Cmaj7 | % |");
+    expect(songToText(song, () => sharpSpell)).toBe("[Verso A ×2]  4/4 ♩=90\n| Dm7 | G7 | Cmaj7 | % |");
   });
 });
 

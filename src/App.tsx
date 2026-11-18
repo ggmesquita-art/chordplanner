@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "./state/store";
 import { Arrangement } from "./ui/Arrangement/Arrangement";
 import { ChordWheel, DegreeStrip } from "./ui/ChordWheel/ChordWheel";
@@ -6,6 +6,7 @@ import { Header } from "./ui/Header";
 import { togglePlay, useMidiSync, useSessionGuard } from "./ui/hooks";
 import { ModifierPanel } from "./ui/ModifierPanel/ModifierPanel";
 import { SharedLink } from "./ui/SharedLink";
+import { Practice } from "./ui/Practice/Practice";
 import { Progression } from "./ui/Progression/Progression";
 import { Transport } from "./ui/Transport/Transport";
 import { useTheme } from "./ui/useTheme";
@@ -40,6 +41,7 @@ export default function App() {
   const setSoundOnClick = useStore((s) => s.setSoundOnClick);
   const soundOnHover = useStore((s) => s.soundOnHover);
   const setSoundOnHover = useStore((s) => s.setSoundOnHover);
+  const [practiceOpen, setPracticeOpen] = useState(false);
   const showDegrees = useStore((s) => s.showDegrees);
   const setShowDegrees = useStore((s) => s.setShowDegrees);
 
@@ -53,6 +55,9 @@ export default function App() {
           <div className="section-head">
             <h2>Roda de acordes</h2>
             <div className="spacer" />
+            <button className="btn small" onClick={() => setPracticeOpen(true)}>
+              🎧 Prática
+            </button>
             <label className="check small">
               <input type="checkbox" checked={soundOnClick} onChange={(e) => setSoundOnClick(e.target.checked)} />
               Som ao clicar
@@ -76,6 +81,7 @@ export default function App() {
       <footer className="footer muted small">
         Espaço: tocar/parar · Ctrl+Z / Ctrl+Shift+Z: desfazer/refazer · Setas + Enter navegam na roda · Samples: SplendidGrandPiano, Greg Sullivan E-Pianos, VCSL, Smolken e MusyngKite (via smplr)
       </footer>
+      {practiceOpen && <Practice onClose={() => setPracticeOpen(false)} />}
     </div>
   );
 }

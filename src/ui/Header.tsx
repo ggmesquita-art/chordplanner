@@ -1,5 +1,6 @@
 import type { AccidentalPref } from "../core/pitch";
-import { useStore } from "../state/store";
+import { keyLabel } from "../core/view";
+import { selectBlock, useStore } from "../state/store";
 import type { RestrictionMode, Theme } from "../state/repository";
 import { useSpeller } from "./hooks";
 import { FileMenu } from "./FileMenu/FileMenu";
@@ -17,6 +18,7 @@ export function Header() {
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
   const spell = useSpeller();
+  const block = useStore((s) => selectBlock(s));
 
   return (
     <header className="header">
@@ -36,6 +38,9 @@ export function Header() {
           ))}
         </select>
       </label>
+      <span className="key-notice small" aria-live="polite">
+        {block?.key && `Bloco “${block.name}” em ${keyLabel(block.key.tonic, block.key.scaleId, accidentals)}`}
+      </span>
       <Segmented<AccidentalPref>
         label="Grafia"
         value={accidentals}

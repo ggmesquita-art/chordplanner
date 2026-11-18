@@ -70,6 +70,8 @@ export type TimedChord = {
   endBpm?: number;
   bassInstrument?: InstrumentId;
   drone?: boolean;
+  /** Evento da casa 2: `chordIndex` indexa `block.ending`, não `block.chords`. */
+  inEnding?: boolean;
 };
 
 export type Marker = {
@@ -106,6 +108,16 @@ export function blockIsIncomplete(song: Song, b: Block): number {
   return missingBeats(blockBeats(b), blockMeter(song, b));
 }
 
+/**
+ * Posição (em tempos, dentro da passada) onde começa o "último compasso" do bloco, o trecho que a casa 2
+ * substitui: o início do último compasso da grade, ou seja floor((total − ε) / tempos-por-compasso) · tempos-por-compasso.
+ * Em bloco incompleto é o trecho final a partir da última barra (ex.: 18 tempos em 4/4 → 16..18).
+ * Acordes que atravessam esse ponto são cortados nele.
+ */
+export function endingCut(block: Block, meter: Meter): number {
+  return Math.max(0, Math.floor((blockBeats(block) - 1e-9) / meter[0]) * meter[0]);
+}
+
 type Acc = { events: TimedChord[]; markers: Marker[]; tempoMap: TempoPoint[]; sec: number; beatAbs: number; bars: number };
 
 const newAcc = (): Acc => ({ events: [], markers: [], tempoMap: [], sec: 0, beatAbs: 0, bars: 0 });
@@ -125,9 +137,6 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
     a.tempoMap.push({ startSec: a.sec, bpm, meter, startBeat: a.beatAbs });
   }
   a.markers.push({ itemIndex, blockId: block.id, name: block.name, startSec: a.sec, startBar: a.bars, bpm, meter });
-  // Segundos entre duas posições da passada (rampa linear de BPM; sem `rampTo`, andamento constante).
-  const secs = (b0: number, b1: number) => (target === undefined ? (b1 - b0) * secondsPerBeat(bpm) : rampSeconds(total, bpm, target, b0, b1));
-
   // Região da passada que será emitida (acordes from..to).
   let regionStart = Infinity;
   let regionEnd = 0;
@@ -140,21 +149,47 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
     p += c.duration;
   });
 
+  // Casa 2: só na instância inteira (não em região) com ×2 ou mais.
+  const ending = from === 0 && to === Infinity && repeat >= 2 && block.ending?.length ? block.ending : undefined;
+  const cut = endingCut(block, meter);
+
+  type Piece = { chord: Chord; chordIndex: number; blockBeat: number; beats: number; inEnding: boolean };
   for (let rep = 0; rep < repeat; rep++) {
-    let beatsDone = 0;
+    const withEnding = !!ending && rep === repeat - 1;
+    // Peças da passada: os acordes do bloco; na última passada com casa 2, o último compasso é trocado.
+    const pieces: Piece[] = [];
     let pos = 0;
-    // Rampa: um ponto de tempo por tempo, com o BPM médio dele (o export MIDI reproduz a rampa por degraus).
-    if (target !== undefined && regionStart < regionEnd) {
-      for (let b = regionStart; b < regionEnd - 1e-9; b += 1) {
-        const end = Math.min(b + 1, regionEnd);
-        a.tempoMap.push({ startSec: a.sec + secs(regionStart, b), bpm: (60 * (end - b)) / secs(b, end), meter, startBeat: a.beatAbs + (b - regionStart), ramp: true });
-      }
-    }
     block.chords.forEach((chord, chordIndex) => {
       const blockBeat = pos;
       pos += chord.duration;
       if (chordIndex < from || chordIndex > to) return;
-      const durationSec = secs(blockBeat, blockBeat + chord.duration);
+      if (withEnding && blockBeat >= cut - 1e-9) return;
+      const beats = withEnding ? Math.min(chord.duration, cut - blockBeat) : chord.duration;
+      pieces.push({ chord, chordIndex, blockBeat, beats, inEnding: false });
+    });
+    let passEnd = regionEnd;
+    if (withEnding) {
+      let q = cut;
+      ending!.forEach((chord, chordIndex) => {
+        pieces.push({ chord, chordIndex, blockBeat: q, beats: chord.duration, inEnding: true });
+        q += chord.duration;
+      });
+      passEnd = q;
+    }
+    // A rampa vai até o fim da passada: na última passada com casa 2 isso pode diferir de `total`.
+    const passTotal = withEnding ? passEnd : total;
+    // Segundos entre duas posições da passada (rampa linear de BPM; sem `rampTo`, andamento constante).
+    const secs = (b0: number, b1: number) => (target === undefined ? (b1 - b0) * secondsPerBeat(bpm) : rampSeconds(passTotal, bpm, target, b0, b1));
+    let beatsDone = 0;
+    // Rampa: um ponto de tempo por tempo, com o BPM médio dele (o export MIDI reproduz a rampa por degraus).
+    if (target !== undefined && regionStart < passEnd) {
+      for (let b = regionStart; b < passEnd - 1e-9; b += 1) {
+        const end = Math.min(b + 1, passEnd);
+        a.tempoMap.push({ startSec: a.sec + secs(regionStart, b), bpm: (60 * (end - b)) / secs(b, end), meter, startBeat: a.beatAbs + (b - regionStart), ramp: true });
+      }
+    }
+    for (const { chord, chordIndex, blockBeat, beats, inEnding } of pieces) {
+      const durationSec = secs(blockBeat, blockBeat + beats);
       a.events.push({
         chord,
         blockId: block.id,
@@ -163,22 +198,23 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
         chordIndex,
         startBeat: a.beatAbs,
         blockBeat,
-        beats: chord.duration,
+        beats,
         startSec: a.sec,
         durationSec,
-        bpm: target === undefined ? bpm : rampBpmAt(total, bpm, target, blockBeat),
-        endBpm: target === undefined ? bpm : rampBpmAt(total, bpm, target, blockBeat + chord.duration),
+        bpm: target === undefined ? bpm : rampBpmAt(passTotal, bpm, target, blockBeat),
+        endBpm: target === undefined ? bpm : rampBpmAt(passTotal, bpm, target, blockBeat + beats),
         meter,
         pattern: block.pattern ?? song.pattern,
         instrument: block.instrument ?? song.instrument,
+        ...(inEnding ? { inEnding: true } : {}),
         ...(block.bassInstrument ? { bassInstrument: block.bassInstrument } : {}),
         ...(block.drone ? { drone: true } : {}),
       });
-      a.beatAbs += chord.duration;
+      a.beatAbs += beats;
       a.sec += durationSec;
-      beatsDone += chord.duration;
-    });
-    a.bars += (from === 0 && to === Infinity ? total : beatsDone) / meter[0];
+      beatsDone += beats;
+    }
+    a.bars += beatsDone / meter[0];
   }
 }
 

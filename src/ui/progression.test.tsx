@@ -211,3 +211,33 @@ describe("alça, teclas e camadas de Esc", () => {
     expect(screen.getByLabelText("Expandir modificadores")).toBeTruthy();
   });
 });
+
+describe("casa 2", () => {
+  const block = () => selectBlock(useStore.getState())!;
+
+  it("+ Casa 2 entra no modo, a roda adiciona à casa 2 e dá para alternar e remover", () => {
+    setup(2);
+    render(<Progression />);
+    fireEvent.click(screen.getByText("+ Casa 2"));
+    expect(useStore.getState().editEnding).toBe(true);
+    expect(screen.getByText(/Casa 2 — substitui o último compasso/)).toBeTruthy();
+    act(() => useStore.getState().addChord(5, "maj"));
+    expect(block().ending).toHaveLength(1);
+    expect(chords()).toHaveLength(2);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Acordes" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Casa 2" }));
+    fireEvent.click(screen.getByText("Remover casa 2"));
+    expect(block().ending).toBeUndefined();
+    expect(useStore.getState().editEnding).toBe(false);
+  });
+
+  it("com ×2 no arranjo o controle segmentado aparece em vez do botão", () => {
+    setup(2);
+    act(() => useStore.getState().setRepeat(0, 2));
+    render(<Progression />);
+    expect(screen.queryByText("+ Casa 2")).toBeNull();
+    expect(screen.getByRole("button", { name: "Casa 2" })).toBeTruthy();
+  });
+});

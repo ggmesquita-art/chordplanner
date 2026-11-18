@@ -4,7 +4,7 @@ import { nextChordSuggestions } from "../../core/analysis";
 import type { SeventhInfo } from "../../core/diatonic";
 import { chordSymbol } from "../../core/modifiers";
 import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
-import { WHEEL_RINGS, chromaticTitle, extraQualities, hoverChordInfo, sliceClickable, sliceState, wheelCounts, wheelSlices } from "../../core/view";
+import { WHEEL_RINGS, chromaticTitle, extraQualities, hoverChordInfo, sliceClickable, shortScaleName, sliceState, wheelCounts, wheelSlices } from "../../core/view";
 import { useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
@@ -68,6 +68,7 @@ export function ChordWheel() {
   const spell = useSpeller();
   const mode = useStore((s) => s.mode);
   const tonic = useStore((s) => s.tonic);
+  const globalScaleId = useStore((s) => s.scaleId);
   const soundOnClick = useStore((s) => s.soundOnClick);
   const selectedChordId = useStore((s) => s.selectedChord);
   const playhead = useStore((s) => s.playhead);
@@ -138,7 +139,8 @@ export function ChordWheel() {
     hoverPlayed.current = null;
   };
 
-  const rotation = useRotation(tonic === null ? 0 : -fifthsPosition(tonic) * 30);
+  // A roda gira para a tônica do BLOCO selecionado (modulação) — ou a global.
+  const rotation = useRotation(ctx === null ? 0 : -fifthsPosition(ctx.tonic) * 30);
 
   const selected = block?.chords.find((c) => c.id === selectedChordId) ?? null;
   const playing = useMemo(() => {
@@ -212,7 +214,7 @@ export function ChordWheel() {
           Array.from({ length: 12 }, (_, pos) => {
             const { root, state: st, clickable: can, chromatic, roman, icon } = slices[ri][pos];
             const angle = pos * 30 + rotation;
-            const isTonic = tonic !== null && root === tonic && ctx?.degrees[0]?.primary === ring.quality;
+            const isTonic = ctx !== null && root === ctx.tonic && ctx.degrees[0]?.primary === ring.quality;
             const isSel = selected && selected.root === root && selected.quality === ring.quality;
             const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
             const sym = chordSymbol(makeChord(root, ring.quality), spell);
@@ -312,11 +314,16 @@ export function ChordWheel() {
         ) : (
           <g className="center-text">
             <text x={C} y={C - 6} textAnchor="middle" className="center-big">
-              {tonic === null ? "?" : spell(tonic)}
+              {ctx === null ? "?" : spell(ctx.tonic)}
             </text>
             <text x={C} y={C + 16} textAnchor="middle" className="center-small">
-              {tonic === null ? "escolha a tônica" : ctx?.scale.name.replace(/ \(.*\)/, "")}
+              {ctx === null ? "escolha a tônica" : shortScaleName(ctx.scale.id)}
             </text>
+            {ctx !== null && tonic !== null && (ctx.tonic !== tonic || ctx.scale.id !== globalScaleId) && (
+              <text x={C} y={C + 32} textAnchor="middle" className="center-small muted-fill">
+                modulação
+              </text>
+            )}
           </g>
         )}
       </svg>

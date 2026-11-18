@@ -2,20 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getInstrumentDef } from "../../audio/instruments";
 import { FUNCTION_NAME, harmonicFunction } from "../../core/analysis";
+import type { Chord } from "../../core/chords";
 import { chordSymbol } from "../../core/modifiers";
-import { blockBeats, blockBpm, blockMeter, type PlaybackPattern } from "../../core/song";
+import { scaleContext } from "../../core/diatonic";
+import { makeSpeller } from "../../core/pitch";
+import { blockBeats, blockBpm, blockMeter, endingCut, expandArrangement, type Block, type PlaybackPattern } from "../../core/song";
 import { GRIDS, METERS, barLinesWithin, formatPosition, gridBeats, meterLabel, missingBeats, stepDuration, type Grid, type Meter } from "../../core/timeline";
 import { chordRole, chordStarts, chromaticTitle, droppedByChord, rulerMarks } from "../../core/view";
-import { selectRegion, useStore } from "../../state/store";
+import { blockKey, selectBlock, selectRegion, useStore } from "../../state/store";
 import { songToText } from "../../export/text";
 import { exportJson, shareUrl } from "../fileActions";
 import { NumberField } from "../NumberField";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { InstrumentPicker } from "../InstrumentPicker/InstrumentPicker";
 import { PATTERNS } from "../patterns";
+import { BlockKey } from "./BlockKey";
 import { BlockPlayback } from "./BlockPlayback";
 import { ResizeHandle } from "./ResizeHandle";
 
+const EMPTY: Chord[] = [];
 const GRID_LABEL: Record<string, string> = { "0.5": "½ tempo", "1": "1 tempo", "2": "2 tempos", "4": "4 tempos", bar: "compasso" };
 
 /** Régua do card: marca a cada tempo, marca forte + número nos compassos e ligadura nas barras internas. */
@@ -134,14 +139,27 @@ export function Progression() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef<string | null>(null);
   const grid = useStore((s) => s.grid);
+  const editEnding = useStore((s) => s.editEnding);
+  const playScope = useStore((s) => s.playScope);
+  // `selectEditChords` devolve [] novo sem casa 2: seleciona as listas estáveis e escolhe aqui.
+  const rawEnding = useStore((s) => selectBlock(s)?.ending);
   const region = useStore(useShallow((s) => selectRegion(s)));
 
   const instrumentId = block?.instrument ?? song.instrument;
-  const chords = block?.chords;
+  const list = useMemo(() => (editEnding ? (rawEnding ?? EMPTY) : (block?.chords ?? EMPTY)), [editEnding, rawEnding, block?.chords]);
   const dropped = useMemo(() => {
     const def = getInstrumentDef(instrumentId);
-    return droppedByChord(chords ?? [], def.range);
-  }, [chords, instrumentId]);
+    return droppedByChord(list, def.range);
+  }, [list, instrumentId]);
+
+  // O `playhead` guarda só `chordIndex`; se o evento tocando é da casa 2 (`inEnding`) vem da expansão que o
+  // togglePlay tocou (mesma regra de escopo; escopo "região" nunca tem casa 2). Limitação: editar durante a reprodução
+  // pode desalinhar `eventIndex` até a próxima passada.
+  const playingInEnding = useMemo(() => {
+    if (!playhead || playScope === "region") return false;
+    const events = expandArrangement(song, playScope === "block" ? [selectedItem] : undefined).events;
+    return !!events[playhead.eventIndex]?.inEnding;
+  }, [playhead, playScope, song, selectedItem]);
 
   // Refoca o card (pelo id) depois que mover/remover re-renderizou a lista.
   useEffect(() => {
@@ -160,7 +178,7 @@ export function Progression() {
   const missing = missingBeats(total, meter);
   const isPlayingBlock = playhead && song.arrangement[playhead.itemIndex]?.blockId === block.id;
 
-  const activate = (c: (typeof block.chords)[number], shift: boolean) => {
+  const activate = (c: (typeof list)[number], shift: boolean) => {
     if (shift && useStore.getState().selectedChord) {
       actions.setRegionEnd(c.id);
       return;
@@ -169,7 +187,15 @@ export function Progression() {
     previewChord(c);
   };
 
-  const starts = chordStarts(block.chords);
+  // Em modo casa 2 a régua começa no último compasso do bloco.
+  const cut = editEnding ? endingCut(block, meter) : 0;
+  const starts = chordStarts(list).map((x) => x + cut);
+  const endingAvailable = editEnding || !!block.ending?.length || song.arrangement.some((it) => it.blockId === block.id && it.repeat >= 2);
+  const spellFor = (b: Block) => {
+    const st = useStore.getState();
+    const key = blockKey(st, b);
+    return makeSpeller(key?.tonic ?? null, key ? scaleContext(key.tonic, key.scaleId).pcs : [], st.accidentals);
+  };
 
   return (
     <section className="progression" aria-label="Progressão">
@@ -239,6 +265,7 @@ export function Progression() {
             {blockBpm(song, block)} bpm · {meterLabel(meter)}
           </span>
           <BlockPlayback key={block.id} blockId={block.id} />
+          <BlockKey key={`k${block.id}`} blockId={block.id} />
         </div>
       </div>
 
@@ -269,6 +296,20 @@ export function Progression() {
             </button>
           </span>
         )}
+        {endingAvailable ? (
+          <div className="ending-toggle" role="group" aria-label="Lista em edição">
+            <button className={`btn ${!editEnding ? "primary" : ""}`} aria-pressed={!editEnding} onClick={() => actions.setEditEnding(false)}>
+              Acordes
+            </button>
+            <button className={`btn ${editEnding ? "primary" : ""}`} aria-pressed={editEnding} onClick={() => actions.setEditEnding(true)}>
+              Casa 2
+            </button>
+          </div>
+        ) : (
+          <button className="btn ghost" title="Último compasso diferente na repetição (casa 1 / casa 2)" onClick={() => actions.setEditEnding(true)}>
+            + Casa 2
+          </button>
+        )}
         <div className="spacer" />
         <button className="icon-btn" onClick={actions.undo} disabled={!canUndo} title="Desfazer (Ctrl+Z)" aria-label="Desfazer">
           ⟲
@@ -279,7 +320,7 @@ export function Progression() {
         <button className="icon-btn" onClick={actions.clearBlock} title="Limpar bloco" aria-label="Limpar bloco">
           🗑
         </button>
-        <button className="btn" onClick={() => setModal({ title: "Cifra por seção", text: songToText(song, spell) })}>
+        <button className="btn" onClick={() => setModal({ title: "Cifra por seção", text: songToText(song, spellFor) })}>
           ⤓ Exportar cifra
         </button>
         <button
@@ -315,8 +356,18 @@ export function Progression() {
         </button>
       </div>
 
-      <div className="timeline" role="list" ref={timelineRef}>
-        {block.chords.map((c, i) => {
+      {editEnding && (
+        <div className="ending-bar small">
+          <span>Casa 2 — substitui o último compasso na última repetição</span>
+          {block.ending && (
+            <button className="btn" onClick={actions.clearEnding}>
+              Remover casa 2
+            </button>
+          )}
+        </div>
+      )}
+      <div className={`timeline ${editEnding ? "ending-lane" : ""}`} role="list" ref={timelineRef}>
+        {list.map((c, i) => {
           const start = starts[i];
           const { inScale, chromatic, roman } = chordRole(ctx, c);
           const fn = ctx ? harmonicFunction(ctx, c) : null;
@@ -324,7 +375,7 @@ export function Progression() {
           const crosses = barLinesWithin(start, shown, meter).length > 0;
           const inRegion = !!region && i >= region.from && i <= region.to;
           const lost = dropped.get(c.id) ?? 0;
-          const playing = isPlayingBlock && playhead?.chordIndex === i && playhead.itemIndex === selectedItem;
+          const playing = isPlayingBlock && playhead?.chordIndex === i && playhead.itemIndex === selectedItem && playingInEnding === editEnding;
           return (
             <div
               key={c.id}
@@ -350,8 +401,8 @@ export function Progression() {
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey) return;
                 const k = e.key;
-                const n = block.chords.length;
-                const sibling = (d: number) => block.chords[i + d];
+                const n = list.length;
+                const sibling = (d: number) => list[i + d];
                 if (k === "Enter" || k === " ") {
                   e.preventDefault();
                   e.stopPropagation(); // Espaço não aciona o play global
@@ -441,9 +492,9 @@ export function Progression() {
             </div>
           );
         })}
-        {!block.chords.length && (
+        {!list.length && (
           <div className="empty-hint muted">
-            {tonic === null ? "Escolha a tônica (no topo ou clicando na roda) para começar." : "Clique nos acordes liberados da roda para montar a progressão."}
+            {editEnding ? "Clique nos acordes da roda para montar a casa 2." : tonic === null ? "Escolha a tônica (no topo ou clicando na roda) para começar." : "Clique nos acordes liberados da roda para montar a progressão."}
           </div>
         )}
       </div>
@@ -452,7 +503,7 @@ export function Progression() {
         {announce}
       </div>
 
-      {missing > 0 && block.chords.length > 0 && (
+      {!editEnding && missing > 0 && block.chords.length > 0 && (
         <div className="warn-bar small">
           ⚠ Compasso incompleto — faltam {missing} tempo{missing > 1 ? "s" : ""} para fechar o compasso em {meterLabel(meter)}.
           <button className="btn" onClick={actions.completeBar}>

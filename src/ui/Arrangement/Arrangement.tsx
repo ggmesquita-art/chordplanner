@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BLOCK_COLORS } from "../../core/song";
 import { TEMPLATES, type TemplateId } from "../../core/templates";
-import { arrangementLayout, blockUsage } from "../../core/view";
+import { arrangementLayout, blockUsage, keyLabel } from "../../core/view";
 import { useStore } from "../../state/store";
 import { barTicks } from "./barTicks";
 
@@ -30,6 +30,7 @@ export function Arrangement() {
   // A confirmação só vale enquanto o mesmo bloco estiver selecionado.
   const pendingRemove = confirmRemove !== null && song.arrangement[selected]?.id === confirmRemove ? confirmRemove : null;
   const removeTitle = (n: number) => (n > 1 ? "Remove só esta instância; o bloco continua nas outras" : "Remover do arranjo");
+  const accidentals = useStore((s) => s.accidentals);
   const usage = blockUsage(song);
   const { entries: items, end: bar } = arrangementLayout(song);
 
@@ -75,7 +76,7 @@ export function Arrangement() {
               data-item-id={item.id}
               tabIndex={0}
               aria-current={i === selected ? "true" : undefined}
-              aria-label={`Bloco “${block.name}”, ×${item.repeat}, compassos ${Math.floor(start)}–${Math.max(Math.floor(start), Math.ceil(start + bars - 1))}`}
+              aria-label={`Bloco “${block.name}”, ×${item.repeat}, compassos ${Math.floor(start)}–${Math.max(Math.floor(start), Math.ceil(start + bars - 1))}${block.key ? `, em ${keyLabel(block.key.tonic, block.key.scaleId, accidentals)}` : ""}`}
               aria-keyshortcuts="Enter Space ArrowLeft ArrowRight Alt+ArrowLeft Alt+ArrowRight"
               title="Alt+←/→ move o bloco"
               onKeyDown={(e) => {
@@ -138,6 +139,11 @@ export function Arrangement() {
                 {(usage.get(block.id) ?? 0) > 1 && (
                   <span className="linked" title="Bloco vinculado: editar muda todas as instâncias">
                     🔗
+                  </span>
+                )}
+                {block.key && (
+                  <span className="key-badge" title={`Modulação: ${keyLabel(block.key.tonic, block.key.scaleId, accidentals)}`}>
+                    {keyLabel(block.key.tonic, block.key.scaleId, accidentals)}
                   </span>
                 )}
                 <span className="repeat">×{item.repeat}</span>

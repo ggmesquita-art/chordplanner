@@ -64,13 +64,14 @@ export function normalizeHash(hash: string | null): string | null {
 /** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
 type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
-type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "theme"> & {
+type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "instrumentView" | "theme"> & {
   theme: Theme;
   midi: MidiSettings;
   countIn: boolean;
   grid: Grid;
   showDegrees: boolean;
   soundOnHover: boolean;
+  instrumentView: "keyboard" | "guitar";
   /** Outra ponta da região selecionada (id de acorde do bloco atual); a primeira é `selectedChord`. */
   regionEnd: string | null;
   /** A progressão edita a casa 2 do bloco (`block.ending`) em vez dos acordes principais. */
@@ -106,6 +107,7 @@ type Actions = {
   setGrid: (g: Grid) => void;
   setShowDegrees: (v: boolean) => void;
   setSoundOnHover: (v: boolean) => void;
+  setInstrumentView: (v: "keyboard" | "guitar") => void;
   setTheme: (t: Theme) => void;
   /** Estende a seleção até este acorde do bloco atual (null desfaz a região). */
   setRegionEnd: (id: string | null) => void;
@@ -190,7 +192,7 @@ function initialState(): State {
     countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, theme = "auto", ...rest } = base;
+  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, instrumentView = "keyboard", theme = "auto", ...rest } = base;
   return {
     ...rest,
     theme,
@@ -198,6 +200,7 @@ function initialState(): State {
     grid,
     showDegrees,
     soundOnHover,
+    instrumentView,
     regionEnd: null,
     editEnding: false,
     // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
@@ -236,11 +239,13 @@ export function selectBlockCtx(s: Pick<State, "tonic" | "scaleId" | "song" | "se
   return key ? scaleContext(key.tonic, key.scaleId) : null;
 }
 
-/** Acordes que a progressão está editando: os do bloco ou os da casa 2. */
+const NO_CHORDS: Chord[] = [];
+
+/** Acordes que a progressão está editando: os do bloco ou os da casa 2 (referência estável, segura em `useStore`). */
 export function selectEditChords(s: Pick<State, "song" | "selectedItem" | "editEnding">): Chord[] {
   const block = selectBlock(s);
-  if (!block) return [];
-  return s.editEnding ? (block.ending ?? []) : block.chords;
+  if (!block) return NO_CHORDS;
+  return s.editEnding ? (block.ending ?? NO_CHORDS) : block.chords;
 }
 
 export const selectBlock = (s: Pick<State, "song" | "selectedItem">): Block | null => {
@@ -391,6 +396,7 @@ export const useStore = create<Store>()((set, get) => {
     setGrid: (grid) => set({ grid }),
     setShowDegrees: (showDegrees) => set({ showDegrees }),
     setSoundOnHover: (soundOnHover) => set({ soundOnHover }),
+    setInstrumentView: (instrumentView) => set({ instrumentView }),
     setTheme: (theme) => set({ theme }),
     setRegionEnd: (regionEnd) => set({ regionEnd }),
     setLoop: (loop) => set({ loop }),
@@ -788,6 +794,7 @@ function buildSession(s: State): Session {
     grid: s.grid,
     showDegrees: s.showDegrees,
     soundOnHover: s.soundOnHover,
+    instrumentView: s.instrumentView,
     theme: s.theme,
     midi: s.midi,
     song: s.song,

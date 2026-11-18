@@ -117,3 +117,63 @@ describe("rampTo (ritardando/accelerando)", () => {
     expect(ex.tempoMap[ex.tempoMap.length - 1].ramp).toBeUndefined();
   });
 });
+
+describe("casa 1 / casa 2", () => {
+  function withEnding(repeat = 2) {
+    const song = makeSong();
+    song.bpm = 120;
+    song.arrangement[0].repeat = repeat;
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.chords = [makeChord(0, "maj", 4), makeChord(5, "maj", 4), makeChord(7, "maj", 4), makeChord(0, "maj", 4)];
+    block.ending = [makeChord(5, "maj", 2), makeChord(7, "maj", 2)];
+    return { song, block };
+  }
+
+  it("a última passada troca o último compasso pela casa 2", () => {
+    const { song } = withEnding();
+    const ex = expandArrangement(song);
+    expect(ex.events.map((e) => [e.repetition, e.chordIndex, !!e.inEnding])).toEqual([
+      [0, 0, false], [0, 1, false], [0, 2, false], [0, 3, false],
+      [1, 0, false], [1, 1, false], [1, 2, false], [1, 0, true], [1, 1, true],
+    ]);
+    expect(ex.events.reduce((a, e) => a + e.beats, 0)).toBe(32);
+    expect(ex.totalBars).toBe(8);
+    expect(ex.events[7].blockBeat).toBe(12);
+    expect(ex.events[8].blockBeat).toBe(14);
+    ex.events.forEach((e, i) => {
+      if (i > 0) expect(e.startSec).toBeCloseTo(ex.events[i - 1].startSec + ex.events[i - 1].durationSec);
+      if (i > 0) expect(e.startBeat).toBe(ex.events[i - 1].startBeat + ex.events[i - 1].beats);
+    });
+    expect(ex.totalSec).toBeCloseTo(32 * 0.5);
+  });
+
+  it("com ×1 ou em região a casa 2 é ignorada", () => {
+    const { song } = withEnding(1);
+    expect(expandArrangement(song).events.length).toBe(4);
+    const two = withEnding(2).song;
+    expect(expandRegion(two, 0, 0, 3).events.some((e) => e.inEnding)).toBe(false);
+  });
+
+  it("acorde que atravessa a barra do último compasso é cortado nela", () => {
+    const { song, block } = withEnding();
+    block.chords = [makeChord(0, "maj", 4), makeChord(5, "maj", 8), makeChord(7, "maj", 4)];
+    const ev = expandArrangement(song).events.filter((e) => e.repetition === 1);
+    expect(ev.map((e) => [e.chordIndex, e.beats, !!e.inEnding])).toEqual([[0, 4, false], [1, 8, false], [0, 2, true], [1, 2, true]]);
+    block.chords = [makeChord(0, "maj", 4), makeChord(5, "maj", 6), makeChord(7, "maj", 2)];
+    const ev2 = expandArrangement(song).events.filter((e) => e.repetition === 1);
+    expect(ev2.map((e) => [e.chordIndex, e.beats])).toEqual([[0, 4], [1, 4], [0, 2], [1, 2]]);
+    expect(ev2[1].durationSec).toBeCloseTo(4 * 0.5);
+  });
+
+  it("com rampTo os tempos continuam crescentes e a rampa vai até o fim da última passada", () => {
+    const { song, block } = withEnding();
+    block.rampTo = 60;
+    const ex = expandArrangement(song);
+    for (let i = 1; i < ex.events.length; i++) expect(ex.events[i].startSec).toBeGreaterThan(ex.events[i - 1].startSec);
+    const ramp = ex.tempoMap.filter((t) => t.ramp);
+    for (let i = 1; i < ramp.length; i++) expect(ramp[i].startSec).toBeGreaterThan(ramp[i - 1].startSec);
+    const last = ex.events[ex.events.length - 1];
+    expect(last.endBpm).toBeCloseTo(60);
+    expect(last.startSec + last.durationSec).toBeCloseTo(ex.totalSec);
+  });
+});

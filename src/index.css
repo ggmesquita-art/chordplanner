@@ -1458,3 +1458,123 @@ section {
 .degree-alts .chip.seventh {
   border-style: dashed;
 }
+
+/* ——— Modulação por bloco ——— */
+.key-badge {
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  white-space: nowrap;
+}
+.key-notice {
+  color: var(--muted);
+}
+.block-key {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.block-key select {
+  max-width: 160px;
+}
+
+/* ——— Modo prática ——— */
+.practice h3 {
+  margin: 0 0 10px;
+}
+.practice-levels,
+.practice-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.practice-feedback {
+  min-height: 1.5em;
+  font-weight: 600;
+}
+.practice-feedback.ok {
+  color: var(--ok);
+}
+.practice-feedback.bad {
+  color: var(--bad);
+}
+.practice-score {
+  margin: 6px 0 0;
+}
+
+/* ——— Casa 1 / casa 2 ——— */
+.ending-toggle {
+  display: inline-flex;
+  gap: 2px;
+}
+.btn.ghost {
+  opacity: 0.7;
+  border-style: dashed;
+}
+.ending-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  color: #ffb86b;
+}
+.timeline.ending-lane {
+  border: 1px dashed #ffb86b;
+  border-radius: 8px;
+  background: rgba(255, 184, 107, 0.06);
+}
+
+/* ——— Braço de violão ——— */
+.fretboard {
+  display: block;
+  width: 100%;
+  max-width: 150px;
+  margin: 8px auto 4px;
+}
+.fb-fret,
+.fb-string {
+  stroke: var(--muted);
+  stroke-width: 0.7;
+}
+.fb-nut {
+  fill: var(--muted);
+}
+.fb-mark,
+.fb-label {
+  font-size: 9px;
+  fill: var(--muted);
+}
+.fb-open {
+  fill: none;
+  stroke-width: 1.4;
+}
+.fb-open.diatonic {
+  stroke: var(--ok);
+}
+.fb-open.tension {
+  stroke: var(--tension);
+}
+.fb-open.outside {
+  stroke: var(--bad);
+}
+.fb-barre {
+  fill: var(--muted);
+  opacity: 0.35;
+}
+.fb-dot.diatonic {
+  fill: var(--ok);
+}
+.fb-dot.tension {
+  fill: var(--tension);
+}
+.fb-dot.outside {
+  fill: var(--bad);
+}
+.fretboard-empty {
+  margin: 10px 0 4px;
+}
