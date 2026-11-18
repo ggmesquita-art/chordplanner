@@ -141,13 +141,13 @@ function createWindow() {
 
   // Links externos abrem no navegador; a janela só navega dentro do app.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url);
+    if (/^(https?|mailto):/.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (e, url) => {
     if (url.startsWith(ORIGIN)) return;
     e.preventDefault();
-    if (/^https?:/.test(url)) void shell.openExternal(url);
+    if (/^(https?|mailto):/.test(url)) void shell.openExternal(url);
   });
 
   if (mirrorMode) {

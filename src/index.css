@@ -299,7 +299,8 @@ h2 .muted {
 }
 @media (min-width: 901px) and (max-width: 1679px) {
   /* Rótulos dos seletores do topo somem (o valor e a dica continuam): cabeçalho numa linha só. */
-  .top-panel .picker-label {
+  .top-panel .picker-label,
+  .top-panel .about-label {
     display: none;
   }
 }
@@ -2046,4 +2047,183 @@ section {
   stroke: var(--ok);
   stroke-width: 5;
   filter: brightness(1.2);
+}
+
+/* ——— About ——— */
+.about-btn {
+  white-space: nowrap;
+}
+.modal.about {
+  position: relative;
+  width: min(440px, 100%);
+  padding: 22px 22px 18px;
+  overflow: hidden;
+}
+.modal.about::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.about-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 32px;
+}
+.about-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 15px;
+  flex: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.modal h3.about-name {
+  font-size: 22px;
+  margin: 0 0 2px;
+}
+.about-hero p {
+  margin: 0;
+}
+.about-creator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  margin: 20px 0 16px;
+  padding: 16px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+}
+.about-kicker {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.about-person {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.about-alias {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.about-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.about-links a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.about-links a:hover,
+.about-links a:focus-visible {
+  border-color: var(--accent);
+  transform: translateX(2px);
+  outline: none;
+}
+.about-link-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex: none;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.about-link-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.about-link-text .small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.about-arrow {
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .about-links a {
+    transition: none;
+  }
+  .about-links a:hover {
+    transform: none;
+  }
+}
+
+/* Cabeçalho numa linha só em telas largas: o que é texto livre (nome da música, instrumento,
+   aviso de tom do bloco) encolhe com reticências em vez de empurrar o resto para outra linha. */
+@media (min-width: 1360px) {
+  .top-panel .header {
+    flex-wrap: nowrap;
+  }
+  .top-panel .header > * {
+    flex-shrink: 0;
+  }
+  .top-panel .header > .file-menu,
+  .top-panel .header > .inst-picker,
+  .top-panel .header > .key-notice {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  /* O nome da música encolhe antes do instrumento; os botões do grupo de arquivo nunca quebram. */
+  .top-panel .header > .file-menu {
+    flex-shrink: 4;
+  }
+  .top-panel .file-menu > :not(.song-name),
+  .top-panel .file-menu .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .top-panel .song-name {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+  .top-panel .song-name input {
+    min-width: 7ch;
+    flex: 0 1 auto;
+    text-overflow: ellipsis;
+  }
+  .top-panel .inst-picker .picker-button {
+    max-width: 100%;
+  }
+  .top-panel .inst-picker .picker-value,
+  .top-panel .header > .key-notice {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
 }

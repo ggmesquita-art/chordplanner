@@ -3,6 +3,7 @@ import { keyLabel } from "../core/view";
 import { selectBlock, useStore } from "../state/store";
 import type { RestrictionMode, Theme } from "../state/repository";
 import { useSpeller } from "./hooks";
+import { AboutButton } from "./About";
 import { ExportMenu } from "./ExportMenu/ExportMenu";
 import { FileMenu } from "./FileMenu/FileMenu";
 import { InstrumentPicker } from "./InstrumentPicker/InstrumentPicker";
@@ -75,6 +76,7 @@ export function Header() {
         ]}
       />
       <InstrumentPicker />
+      <AboutButton />
     </header>
   );
 }

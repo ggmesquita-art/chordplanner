@@ -107,7 +107,7 @@ export function InstrumentPicker({ value, onChange, inheritLabel }: { value?: st
   const label = current ? getInstrumentDef(current).name : inheritLabel ?? "—";
 
   return (
-    <div className="picker" ref={ref}>
+    <div className={`picker ${perBlock ? "" : "inst-picker"}`} ref={ref}>
       <button className={`picker-button ${perBlock ? "compact" : ""}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}>
         {!perBlock && <span className="picker-label">Instrumento</span>}
         <span className="picker-value">{current && getInstrumentDef(current).approximates ? "≈ " : ""}{label}</span>
