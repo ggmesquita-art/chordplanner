@@ -19,6 +19,19 @@ export type Block = {
   instrument?: InstrumentId;
   /** Canal MIDI 1–16 deste bloco (override do global). */
   midiChannel?: number;
+  /** Camada de baixo com instrumento próprio (§3.9): toca a fundamental ou o baixo invertido. */
+  bassInstrument?: InstrumentId;
+  /** Bordão contínuo na tônica durante o bloco (§5.2; instrumentos com `drone`). */
+  drone?: boolean;
+  /** BPM ao fim do bloco: rampa a partir do BPM do bloco (menor = ritardando, maior = accelerando) (§3.8). */
+  rampTo?: number;
+  /** Modulação (§3.8): tônica e escala próprias do bloco; sem isto, herda as globais. */
+  key?: { tonic: number; scaleId: string };
+  /**
+   * Casa 2 (§3.8): acordes que substituem o ÚLTIMO compasso na última repetição de cada instância
+   * com ×2 ou mais. As passadas anteriores tocam o bloco inteiro (casa 1 = último compasso original).
+   */
+  ending?: Chord[];
 };
 
 export type ArrangementItem = { id: string; blockId: string; repeat: number };
@@ -29,6 +42,10 @@ export type Song = {
   swing: number;
   instrument: InstrumentId;
   pattern: PlaybackPattern;
+  /** Escolhe a inversão de cada acorde com menor movimento em relação ao anterior (§5.1). */
+  voiceLeading?: boolean;
+  /** Re-ataca a cada compasso acordes longos em instrumentos de decay (§5.2). */
+  reattack?: boolean;
   blocks: Record<string, Block>;
   arrangement: ArrangementItem[];
 };

@@ -166,3 +166,29 @@ describe("versão do arquivo", () => {
     expect(errorOf(JSON.stringify({ ...base, version: 1 }))).toBeNull();
   });
 });
+
+describe("campos da v2 no arquivo", () => {
+  it("preserva os válidos e descarta os inválidos", () => {
+    const song = makeSong();
+    const id = Object.keys(song.blocks)[0];
+    const raw = structuredClone(song) as unknown as { blocks: Record<string, Record<string, unknown>>; voiceLeading?: unknown; reattack?: unknown };
+    Object.assign(raw.blocks[id], {
+      bassInstrument: "piano",
+      drone: true,
+      rampTo: 20,
+      key: { tonic: 2, scaleId: "dorian" },
+      ending: [makeChord(7, "maj", 4), { root: 99, quality: "maj" }],
+    });
+    raw.voiceLeading = true;
+    raw.reattack = "sim";
+    const out = sanitizeContent({ scaleId: "major", tonic: 0, song: raw })!;
+    const b = out.song.blocks[id];
+    expect([b.bassInstrument, b.drone, b.rampTo, b.key]).toEqual(["piano", true, 30, { tonic: 2, scaleId: "dorian" }]);
+    expect(b.ending!.map((c) => c.root)).toEqual([7]);
+    expect(out.song.voiceLeading).toBe(true);
+    expect(out.song.reattack).toBeUndefined();
+    Object.assign(raw.blocks[id], { key: { tonic: 2, scaleId: "nao-existe" }, bassInstrument: "x" });
+    const out2 = sanitizeContent({ scaleId: "major", tonic: 0, song: raw })!;
+    expect([out2.song.blocks[id].key, out2.song.blocks[id].bassInstrument]).toEqual([undefined, undefined]);
+  });
+});

@@ -2,11 +2,12 @@
 // o histórico para desfazer/refazer.
 
 import { create } from "zustand";
-import { makeChord, newChordId, type Chord, type QualityId } from "../core/chords";
+import { makeChord, newChordId, type Chord, type QualityId, type VoicingId } from "../core/chords";
+import { hasInstrument } from "../audio/instruments";
 import { chordFits, scaleContext, tonicChord, type ScaleContext } from "../core/diatonic";
 import { toggleModifier, type Modifier } from "../core/modifiers";
 import { mod12, type AccidentalPref, type PitchClass } from "../core/pitch";
-import { getScale } from "../core/scales";
+import { getScale, SCALES } from "../core/scales";
 import { makeBlock, makeSong, newId, type Block, type PlaybackPattern, type Song } from "../core/song";
 import { buildTemplate, type TemplateId } from "../core/templates";
 import type { Grid, Meter } from "../core/timeline";
@@ -17,6 +18,9 @@ import { CURRENT_VERSION } from "../export/migrate";
 import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
+
+const SCALE_IDS = new Set(SCALES.map((s) => s.id));
+const hasScale = (id: unknown): id is string => typeof id === "string" && SCALE_IDS.has(id);
 
 export type PlayScope = "song" | "block" | "region";
 
@@ -131,7 +135,13 @@ type Actions = {
   moveItem: (from: number, to: number) => void;
   setRepeat: (i: number, n: number) => void;
   renameBlock: (blockId: string, name: string) => void;
-  setBlockProps: (blockId: string, patch: Partial<Pick<Block, "bpm" | "meter" | "pattern" | "instrument" | "midiChannel" | "color">>) => void;
+  setBlockProps: (
+    blockId: string,
+    patch: Partial<Pick<Block, "bpm" | "meter" | "pattern" | "instrument" | "midiChannel" | "color" | "bassInstrument" | "drone" | "rampTo" | "key">>,
+  ) => void;
+  /** Preferências de execução da música inteira. */
+  setSongProps: (patch: Partial<Pick<Song, "voiceLeading" | "reattack">>) => void;
+  setVoicing: (id: string, voicing: VoicingId | undefined) => void;
   applyTemplate: (id: TemplateId) => void;
 
   setBpm: (bpm: number) => void;
@@ -525,11 +535,17 @@ export const useStore = create<Store>()((set, get) => {
         if (!b) return;
         for (const [k, v] of Object.entries(patch) as [keyof typeof patch, unknown][]) {
           let value = v;
-          if (k === "bpm" || k === "midiChannel") {
-            const [lo, hi] = k === "bpm" ? [30, 300] : [1, 16];
+          if (k === "bpm" || k === "midiChannel" || k === "rampTo") {
+            const [lo, hi] = k === "midiChannel" ? [1, 16] : [30, 300];
             value = typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : undefined;
           }
           if (k === "color") value = typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : b.color;
+          if (k === "bassInstrument") value = typeof v === "string" && hasInstrument(v) ? v : undefined;
+          if (k === "drone") value = v === true ? true : undefined;
+          if (k === "key") {
+            const key = v as Block["key"];
+            value = key && Number.isInteger(key.tonic) && key.tonic >= 0 && key.tonic <= 11 && hasScale(key.scaleId) ? { tonic: key.tonic, scaleId: key.scaleId } : undefined;
+          }
           if (value === undefined) delete b[k];
           else Object.assign(b, { [k]: value });
         }
@@ -537,6 +553,21 @@ export const useStore = create<Store>()((set, get) => {
         {},
         Object.keys(patch).every((k) => k === "bpm") ? { coalesce: `bpm:${blockId}` } : undefined,
       ),
+
+    setSongProps: (patch) =>
+      commit((song) => {
+        for (const k of ["voiceLeading", "reattack"] as const) {
+          if (!(k in patch)) continue;
+          if (patch[k]) song[k] = true;
+          else delete song[k];
+        }
+      }),
+
+    setVoicing: (id, voicing) =>
+      editChord(id, (c) => {
+        if (voicing === undefined || voicing === "closed") delete c.voicing;
+        else c.voicing = voicing;
+      }),
 
     applyTemplate: (id) => {
       const s = get();

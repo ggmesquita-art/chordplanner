@@ -108,6 +108,21 @@ function blockOf(key: string, v: unknown, colorIndex: number, used: Set<string>)
   const instrument = instrumentOf(v.instrument);
   if (instrument) block.instrument = instrument;
   if (typeof v.midiChannel === "number" && Number.isFinite(v.midiChannel)) block.midiChannel = Math.max(1, Math.min(16, Math.round(v.midiChannel)));
+  const bass = instrumentOf(v.bassInstrument);
+  if (bass) block.bassInstrument = bass;
+  if (v.drone === true) block.drone = true;
+  const ramp = bpmOf(v.rampTo);
+  if (ramp !== undefined) block.rampTo = ramp;
+  if (isObj(v.key) && isInt(v.key.tonic, 0, 11) && typeof v.key.scaleId === "string" && SCALE_IDS.has(v.key.scaleId)) {
+    block.key = { tonic: v.key.tonic, scaleId: v.key.scaleId };
+  }
+  if (Array.isArray(v.ending)) {
+    const ending = v.ending
+      .slice(0, MAX_CHORDS)
+      .map((c) => chordOf(c, used))
+      .filter((c): c is Chord => c !== null);
+    if (ending.length) block.ending = ending;
+  }
   return block;
 }
 
@@ -152,6 +167,8 @@ export function sanitizeContent(input: unknown): SongContent | null {
       swing: typeof s.swing === "number" && Number.isFinite(s.swing) ? Math.max(0, Math.min(75, s.swing)) : 0,
       instrument: instrumentOf(s.instrument) ?? "piano",
       pattern: patternOf(s.pattern) ?? "block",
+      ...(s.voiceLeading === true ? { voiceLeading: true } : {}),
+      ...(s.reattack === true ? { reattack: true } : {}),
       blocks,
       arrangement: valid,
     },

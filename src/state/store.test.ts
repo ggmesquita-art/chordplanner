@@ -371,4 +371,25 @@ describe("renameSong", () => {
     vi.restoreAllMocks();
     expect(useStore.getState().renameSong("Tres")).toBe(true);
   });
+
+  it("campos da v2 no bloco são validados; preferências da música e voicing do acorde", () => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+    const id = selectBlock(useStore.getState())!.id;
+    const b = () => selectBlock(useStore.getState())!;
+    useStore.getState().setBlockProps(id, { bassInstrument: "nao-existe", drone: true, rampTo: 999, key: { tonic: 14, scaleId: "major" } });
+    expect([b().bassInstrument, b().drone, b().rampTo, b().key]).toEqual([undefined, true, 300, undefined]);
+    useStore.getState().setBlockProps(id, { bassInstrument: "piano", key: { tonic: 9, scaleId: "minor" }, drone: false });
+    expect([b().bassInstrument, b().key, b().drone]).toEqual(["piano", { tonic: 9, scaleId: "minor" }, undefined]);
+    useStore.getState().setSongProps({ voiceLeading: true });
+    expect(useStore.getState().song.voiceLeading).toBe(true);
+    useStore.getState().setSongProps({ voiceLeading: false });
+    expect("voiceLeading" in useStore.getState().song).toBe(false);
+    const chordId = b().chords[0].id;
+    useStore.getState().setVoicing(chordId, "drop2");
+    expect(b().chords[0].voicing).toBe("drop2");
+    useStore.getState().setVoicing(chordId, "closed");
+    expect(b().chords[0].voicing).toBeUndefined();
+  });
 });
