@@ -12,7 +12,9 @@ const UPPER_LOW = 53;
  * Voicing de piano: baixo separado na 2ª oitava (fundamental, inversão ou slash)
  * e estrutura superior fechada a partir da fundamental, começando entre F3 e E4.
  */
-export function voiceChord(chord: Chord): number[] {
+// `prev`: notas do acorde anterior, para a condução de vozes (§5.1); null = sem condução.
+export function voiceChord(chord: Chord, prev: number[] | null = null): number[] {
+  void prev; // usado pela condução de vozes (Etapa 4)
   const oct = (chord.octave ?? 0) * 12;
   const bass = BASS_BASE + mod12(chord.bass ?? chord.root) + oct;
   let upperRoot = 48 + chord.root;
