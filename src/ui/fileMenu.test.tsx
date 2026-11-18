@@ -40,6 +40,16 @@ describe("FileMenu", () => {
     expect(screen.getByText("⚠ Não salvou")).toBeTruthy();
   });
 
+  it("falha ao renomear música já salva mostra o alerta de salvamento", async () => {
+    useStore.getState().renameSong("Salva");
+    expect(useStore.getState().saveSong()).toBe(true);
+    vi.spyOn(repository, "saveSong").mockReturnValue(false);
+    render(<FileMenu />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => fireEvent.change(screen.getByLabelText("Nome da música"), { target: { value: "Salvaa" } }));
+    expect(screen.getByRole("alert").textContent).toContain("Não foi possível salvar");
+  });
+
   it("importa um arquivo válido como música nova", async () => {
     const st = useStore.getState();
     st.setTonic(7);

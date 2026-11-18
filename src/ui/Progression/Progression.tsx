@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getInstrumentDef } from "../../audio/instruments";
-import { chordFits, chromaticFunction, romanFor } from "../../core/diatonic";
 import { chordSymbol } from "../../core/modifiers";
 import { blockBeats, blockBpm, blockMeter, type PlaybackPattern } from "../../core/song";
 import { GRIDS, METERS, barLinesWithin, formatPosition, gridBeats, meterLabel, missingBeats, stepDuration, type Grid, type Meter } from "../../core/timeline";
-import { fitToRange, voiceChord } from "../../core/voicing";
+import { chordRole, chordStarts, droppedByChord, rulerMarks } from "../../core/view";
 import { selectRegion, useStore } from "../../state/store";
 import { songToText } from "../../export/text";
-import { downloadMidi, songToMidi } from "../../export/midi";
 import { exportJson, shareUrl } from "../fileActions";
 import { NumberField } from "../NumberField";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
@@ -21,14 +19,7 @@ const GRID_LABEL: Record<string, string> = { "0.5": "½ tempo", "1": "1 tempo", 
 /** Régua do card: marca a cada tempo, marca forte + número nos compassos e ligadura nas barras internas. */
 function Ruler({ start, duration, meter }: { start: number; duration: number; meter: Meter }) {
   const bpb = meter[0];
-  const marks: { at: number; bar: number | null }[] = [];
-  const first = Math.ceil(start - 1e-9);
-  for (let beat = first; beat < start + duration - 1e-9; beat++) {
-    const at = beat - start;
-    const isBar = beat % bpb === 0;
-    if (duration > 16 && !isBar) continue;
-    marks.push({ at, bar: isBar ? beat / bpb + 1 : null });
-  }
+  const marks = rulerMarks(start, duration, bpb);
   const ties = barLinesWithin(start, duration, meter);
   return (
     <>
@@ -147,7 +138,7 @@ export function Progression() {
   const chords = block?.chords;
   const dropped = useMemo(() => {
     const def = getInstrumentDef(instrumentId);
-    return new Map((chords ?? []).map((c) => [c.id, fitToRange(voiceChord(c), def.range).dropped]));
+    return droppedByChord(chords ?? [], def.range);
   }, [chords, instrumentId]);
 
   // Refoca o card (pelo id) depois que mover/remover re-renderizou a lista.
@@ -176,7 +167,7 @@ export function Progression() {
     previewChord(c);
   };
 
-  const starts = block.chords.map((_, i) => block.chords.slice(0, i).reduce((n, c) => n + c.duration, 0));
+  const starts = chordStarts(block.chords);
 
   return (
     <section className="progression" aria-label="Progressão">
@@ -293,7 +284,10 @@ export function Progression() {
           title="Arquivo MIDI com trilhas de acordes e baixo, tempo, compassos e marcadores — arraste para o Ableton"
           onClick={() => {
             const st = useStore.getState();
-            downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true }), st.songName);
+            // @tonejs/midi só é baixado quando alguém exporta.
+            void import("../../export/midi").then(({ downloadMidi, songToMidi }) =>
+              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true }), st.songName),
+            );
           }}
         >
           ⤓ MIDI (.mid)
@@ -321,9 +315,7 @@ export function Progression() {
       <div className="timeline" role="list" ref={timelineRef}>
         {block.chords.map((c, i) => {
           const start = starts[i];
-          const inScale = !ctx || chordFits(c.root, c.quality, ctx.pcSet);
-          const chromatic = ctx && !inScale ? chromaticFunction(ctx, c.root, c.quality) : null;
-          const roman = ctx ? chromatic?.label ?? romanFor(ctx, c.root, c.quality) : "";
+          const { inScale, chromatic, roman } = chordRole(ctx, c);
           const shown = live?.id === c.id ? live.beats : c.duration;
           const crosses = barLinesWithin(start, shown, meter).length > 0;
           const inRegion = !!region && i >= region.from && i <= region.to;

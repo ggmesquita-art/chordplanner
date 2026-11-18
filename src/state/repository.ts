@@ -7,13 +7,14 @@ import { GRIDS, type Grid } from "../core/timeline";
 import type { MidiSettings } from "../audio/midi";
 import { SCALES } from "../core/scales";
 import { sanitizeContent } from "../export/json";
+import { CURRENT_VERSION, migrate } from "../export/migrate";
 
 export type RestrictionMode = "strict" | "colorful" | "free";
 /** Tema da interface: "auto" segue o sistema. */
 export type Theme = "auto" | "light" | "dark";
 
 export type Session = {
-  version: 1;
+  version: number;
   scaleId: string;
   tonic: number | null;
   accidentals: AccidentalPref;
@@ -41,6 +42,8 @@ export type Session = {
 
 /** Conteúdo de uma música salva: tonalidade + arranjo. Preferências de UI ficam na sessão. */
 export type SavedSong = {
+  /** Versão do formato; ausente nas músicas gravadas antes da migração (= 1). */
+  version?: number;
   id: string;
   name: string;
   updatedAt: number;
@@ -98,6 +101,9 @@ function writeSongs(songs: Record<string, SavedSong>): boolean {
   }
 }
 
+/** Versão de uma música salva (ausente = 1). */
+const songVersion = (s: SavedSong) => (typeof s.version === "number" ? s.version : 1);
+
 const SCALE_IDS = new Set(SCALES.map((s) => s.id));
 const THEMES: Theme[] = ["auto", "light", "dark"];
 const MODES: RestrictionMode[] = ["strict", "colorful", "free"];
@@ -112,11 +118,13 @@ export class LocalSongRepository implements SongRepository {
       const raw = localStorage.getItem(KEY);
       if (!raw) return null;
       const p = JSON.parse(raw) as Record<string, unknown> | null;
-      if (!p || p.version !== 1) return null;
-      const content = sanitizeContent(p);
+      if (!p || typeof p.version !== "number") return null;
+      const migrated = migrate(p, p.version);
+      if (!migrated) return null;
+      const content = sanitizeContent(migrated.data);
       if (!content) return null;
       return {
-        version: 1,
+        version: CURRENT_VERSION,
         ...content,
         accidentals: ACCIDENTALS.find((a) => a === p.accidentals) ?? "auto",
         mode: MODES.find((m) => m === p.mode) ?? "colorful",
@@ -160,7 +168,7 @@ export class LocalSongRepository implements SongRepository {
   listSongs(): SavedSongMeta[] {
     // Metadados coagidos: um registro adulterado não pode quebrar a lista "Abrir".
     return Object.entries(readSongs())
-      .filter(([, s]) => typeof s === "object" && s !== null && typeof s.scaleId === "string" && SCALE_IDS.has(s.scaleId))
+      .filter(([, s]) => typeof s === "object" && s !== null && typeof s.scaleId === "string" && SCALE_IDS.has(s.scaleId) && migrate(s, songVersion(s)))
       .map(([key, s]) => ({
         id: typeof s.id === "string" ? s.id : key,
         name: typeof s.name === "string" ? s.name : "Sem título",
@@ -173,9 +181,11 @@ export class LocalSongRepository implements SongRepository {
 
   loadSong(id: string): SavedSong | null {
     const stored = readSongs()[id];
-    const content = stored ? sanitizeContent(stored) : null;
+    const migrated = stored ? migrate(stored, songVersion(stored)) : null;
+    const content = migrated ? sanitizeContent(migrated.data) : null;
     if (!stored || !content) return null;
     return {
+      version: CURRENT_VERSION,
       id: typeof stored.id === "string" ? stored.id : id,
       name: typeof stored.name === "string" ? stored.name : "Sem título",
       updatedAt: typeof stored.updatedAt === "number" ? stored.updatedAt : 0,

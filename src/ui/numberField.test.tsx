@@ -40,6 +40,15 @@ describe("campo de BPM", () => {
     expect(useStore.getState().past.length).toBe(1);
   });
 
+  it("digitar 3, 30, 300 soma um único passo no desfazer", () => {
+    render(<Transport />);
+    const input = screen.getByLabelText("BPM") as HTMLInputElement;
+    const before = useStore.getState().past.length;
+    for (const v of ["3", "30", "300"]) fireEvent.change(input, { target: { value: v } });
+    expect(useStore.getState().song.bpm).toBe(300);
+    expect(useStore.getState().past.length).toBe(before + 1);
+  });
+
   it("limita ao sair e restaura o valor se vazio", () => {
     render(<Transport />);
     const input = screen.getByLabelText("BPM") as HTMLInputElement;

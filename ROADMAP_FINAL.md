@@ -8,7 +8,7 @@
 - **MVP: completo.** Catálogo de 73 escalas, roda de 3 anéis, progressão, modificadores, playback, 55 instrumentos.
 - **v1: quase completa.** Blocos e arranjo, fórmulas de compasso, swing, templates, modos Estrito/Colorido/Livre, instrumentos sugeridos por escala, salvar/abrir, export de cifra, MIDI e JSON, link de compartilhamento e contagem estão prontos. Falta o que está na Etapa 1.
 - **v2: só o que foi antecipado.** Dominantes secundárias, empréstimo modal, saída MIDI ao vivo e export `.mid` existem; o resto da v2 não começou.
-- **Saúde:** typecheck, lint e build limpos; 91 testes passando; sem vulnerabilidades em `npm audit`.
+- **Saúde:** typecheck, lint e build limpos; 240 testes passando; sem vulnerabilidades em `npm audit`.
 
 ### Entregue na última rodada
 
@@ -79,20 +79,20 @@ Instrumentos e layout (§3.1, §3.9, §5.2)
 - [x] Carregamento de samples extraído para `audio/loaders.ts`.
 
 Arquitetura (§7)
-- [ ] Tirar o cálculo musical de dentro dos componentes (`ScalePicker`, `ChordWheel`, `ModifierPanel`, `InstrumentPicker`, `Progression`, `Arrangement`, `Transport`) e levá-lo para `core/` ou seletores.
-- [ ] Carregar Tone.js e smplr sob demanda: o bundle sai em um único arquivo de 672 kB (193 kB gzip).
-- [ ] Caminho de migração para quando o formato salvo mudar de versão.
+- [x] Cálculo musical fora dos componentes: funções puras em `core/view.ts` e `core/tempo.ts`, com testes.
+- [x] Tone.js, smplr e `@tonejs/midi` carregados sob demanda: o carregamento inicial caiu de 193 kB para 110 kB (gzip). O AudioContext nasce de forma síncrona no primeiro gesto (destrava o áudio no Safari/iOS) e o Tone o adota.
+- [x] Caminho de migração do formato salvo (`export/migrate.ts`), usado por sessão, músicas salvas e arquivos.
 
 Pendências pequenas
-- [ ] Digitar "300" no BPM gera dois passos de desfazer.
-- [ ] Renomear uma música salva com o armazenamento cheio não avisa.
-- [ ] Dados antigos sem ids podem aparecer como "alterações não salvas" ao reabrir.
+- [x] Edições seguidas de BPM e swing em menos de 1 s viram um passo só de desfazer.
+- [x] Renomear com o armazenamento cheio mostra o alerta de falha.
+- [x] O hash de alterações ignora ids de acordes e itens: dados antigos sem ids não aparecem como alterados.
 
 Testes (§10)
-- [ ] Componentes sem teste próprio: `Progression`, `Arrangement`, `ScalePicker`, `InstrumentPicker`, `ModifierPanel`, `MidiPanel` e a navegação por teclado da roda.
-- [ ] Conferir **quais** fatias a roda desabilita (hoje o teste só conta quantas).
-- [ ] `templates.ts`; conversão com fórmulas mistas (4/4 → 7/8 → 6/8).
-- [ ] Gravação da sessão ao fechar, descarte da sessão, "Salvar e abrir" e "Salvar e continuar" quando o salvamento falha.
+- [x] Testes próprios para progressão, arranjo, seletores, modificadores, painel MIDI e teclado da roda.
+- [x] Teste confere **quais** fatias a roda libera nos modos Estrito e Colorido.
+- [x] Testes de `templates.ts` e de fórmulas mistas (4/4 → 7/8 → 6/8).
+- [x] Testes de gravação ao fechar, descarte da sessão e "Salvar e abrir"/"Salvar e continuar" com falha.
 
 ## Etapa 4 — v2
 

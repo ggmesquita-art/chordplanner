@@ -3,8 +3,7 @@ import { preload, previewNotes } from "../../audio/engine";
 import { CATEGORY_NAMES, INSTRUMENTS, getInstrumentDef, type InstrumentCategory, type InstrumentDef } from "../../audio/instruments";
 import { suggestionsFor } from "../../audio/scaleInstruments";
 import { getScale } from "../../core/scales";
-import { voiceChord } from "../../core/voicing";
-import { makeChord } from "../../core/chords";
+import { previewChordNotes } from "../../core/view";
 import { selectChord, selectCtx, useStore } from "../../state/store";
 import { useInstrumentProgress, useInstrumentStatus } from "../hooks";
 import { useListbox } from "../useListbox";
@@ -34,12 +33,7 @@ function StatusDot({ id }: { id: string }) {
 
 function previewInstrument(id: string) {
   const s = useStore.getState();
-  const chord = selectChord(s) ?? (() => {
-    const ctx = selectCtx(s);
-    const q = ctx?.degrees[0]?.primary ?? "maj";
-    return makeChord(s.tonic ?? 0, q);
-  })();
-  void previewNotes(voiceChord(chord), id);
+  void previewNotes(previewChordNotes(selectChord(s), s.tonic, selectCtx(s)), id);
 }
 
 function Row({ def, id, selected, cursor, onPick }: { def: InstrumentDef; id: string; selected: boolean; cursor: boolean; onPick: (id: string) => void }) {

@@ -13,6 +13,7 @@ import type { Grid, Meter } from "../core/timeline";
 import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
 import { sanitizeContent, type SongContent } from "../export/json";
+import { CURRENT_VERSION } from "../export/migrate";
 import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme } from "./repository";
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
@@ -29,9 +30,17 @@ const stableStringify = (value: unknown) =>
       : v,
   );
 
-/** Conteúdo que conta como "a música" para salvar e detectar alterações. */
+/** Conteúdo que conta como "a música" para salvar e detectar alterações. Ids de acorde e de item não entram (só os de bloco). */
 export const contentHash = (s: { song: Song; scaleId: string; tonic: number | null }) =>
-  stableStringify([s.scaleId, s.tonic, s.song]);
+  stableStringify([
+    s.scaleId,
+    s.tonic,
+    {
+      ...s.song,
+      blocks: Object.fromEntries(Object.entries(s.song.blocks).map(([k, b]) => [k, { ...b, chords: b.chords.map(({ id: _id, ...c }) => c) }])),
+      arrangement: s.song.arrangement.map(({ id: _id, ...it }) => it),
+    },
+  ]);
 
 /**
  * Reescreve um hash guardado (o próprio conteúdo em JSON) na forma canônica atual, passando pelo mesmo
@@ -138,7 +147,8 @@ type Actions = {
   saveSong: () => boolean;
   /** Salva uma cópia com outro nome e passa a editar a cópia. */
   saveCopy: (name: string) => boolean;
-  renameSong: (name: string) => void;
+  /** Devolve false se a gravação do nome falhou (o nome na tela fica). */
+  renameSong: (name: string) => boolean;
   newSong: () => void;
   openSong: (id: string) => boolean;
   /** Carrega conteúdo externo (arquivo/link) como música nova, ainda não salva. */
@@ -236,13 +246,29 @@ function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selec
 
 export const useStore = create<Store>()((set, get) => {
   /** Aplica uma edição à música guardando o estado anterior no histórico. */
-  const commit = (fn: (song: Song, s: State) => void, extra: Partial<State> = {}) => {
+  /** Último commit coalescível: só vale enquanto `song` ainda for o estado que ele produziu (nada mexeu no meio). */
+  let mark: { key: string; at: number; song: Song } | null = null;
+
+  /**
+   * Aplica uma edição à música guardando o estado anterior no histórico. Com `coalesce`, um commit da mesma chave
+   * em menos de 1 s do que abriu a entrada substitui o estado sem empilhar outra (ex.: digitar "300" no BPM).
+   */
+  const commit = (fn: (song: Song, s: State) => void, extra: Partial<State> = {}, opts?: { coalesce?: string }) => {
     const s = get();
     const next = structuredClone(s.song);
     fn(next, s);
+    const now = Date.now();
+    const merge = !!opts?.coalesce && mark?.key === opts.coalesce && mark.song === s.song && now - mark.at < 1000 && s.past.length > 0;
+    mark = opts?.coalesce ? { key: opts.coalesce, at: merge ? mark!.at : now, song: next } : null;
     const prev: Snapshot = { song: s.song, tonic: s.tonic, scaleId: s.scaleId };
     // Uma edição que muda o acorde selecionado desfaz a região (ela parte da seleção).
-    set({ song: next, past: [...s.past, prev].slice(-HISTORY_LIMIT), future: [], ...extra, ...("selectedChord" in extra ? { regionEnd: null } : {}) });
+    set({
+      song: next,
+      ...(merge ? {} : { past: [...s.past, prev].slice(-HISTORY_LIMIT) }),
+      future: [],
+      ...extra,
+      ...("selectedChord" in extra ? { regionEnd: null } : {}),
+    });
   };
 
   const currentBlock = (song: Song, s: State): Block | null => {
@@ -493,7 +519,8 @@ export const useStore = create<Store>()((set, get) => {
     setRepeat: (i, n) => commit((song) => void (song.arrangement[i] && (song.arrangement[i].repeat = Math.max(1, Math.min(16, n))))),
     renameBlock: (blockId, name) => commit((song) => void (song.blocks[blockId] && (song.blocks[blockId].name = name || "Bloco"))),
     setBlockProps: (blockId, patch) =>
-      commit((song) => {
+      commit(
+        (song) => {
         const b = song.blocks[blockId];
         if (!b) return;
         for (const [k, v] of Object.entries(patch) as [keyof typeof patch, unknown][]) {
@@ -506,7 +533,10 @@ export const useStore = create<Store>()((set, get) => {
           if (value === undefined) delete b[k];
           else Object.assign(b, { [k]: value });
         }
-      }),
+        },
+        {},
+        Object.keys(patch).every((k) => k === "bpm") ? { coalesce: `bpm:${blockId}` } : undefined,
+      ),
 
     applyTemplate: (id) => {
       const s = get();
@@ -521,9 +551,9 @@ export const useStore = create<Store>()((set, get) => {
       );
     },
 
-    setBpm: (bpm) => commit((song) => void (song.bpm = Math.max(30, Math.min(300, Math.round(bpm))))),
+    setBpm: (bpm) => commit((song) => void (song.bpm = Math.max(30, Math.min(300, Math.round(bpm)))), {}, { coalesce: "bpm" }),
     setMeter: (meter) => commit((song) => void (song.meter = meter)),
-    setSwing: (swing) => commit((song) => void (song.swing = Math.max(0, Math.min(75, swing)))),
+    setSwing: (swing) => commit((song) => void (song.swing = Math.max(0, Math.min(75, swing))), {}, { coalesce: "swing" }),
     setInstrument: (id) => commit((song) => void (song.instrument = id)),
     setPattern: (p) => commit((song) => void (song.pattern = p)),
 
@@ -531,7 +561,7 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       const id = s.songId ?? newId("s");
       const name = s.songName.trim() || UNTITLED;
-      if (!repository.saveSong({ id, name, updatedAt: Date.now(), scaleId: s.scaleId, tonic: s.tonic, song: s.song })) return false;
+      if (!repository.saveSong({ id, name, updatedAt: Date.now(), version: CURRENT_VERSION, scaleId: s.scaleId, tonic: s.tonic, song: s.song })) return false;
       set({ songId: id, songName: name, savedHash: contentHash(s), savedSongs: repository.listSongs() });
       return true;
     },
@@ -549,10 +579,10 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       // Renomear uma música já salva atualiza só o nome na lista, sem salvar o conteúdo.
       const stored = s.songId ? repository.loadSong(s.songId) : null;
-      if (stored && songName.trim()) {
-        repository.saveSong({ ...stored, name: songName.trim() });
-        set({ savedSongs: repository.listSongs() });
-      }
+      if (!stored || !songName.trim()) return true;
+      if (!repository.saveSong({ ...stored, name: songName.trim() })) return false;
+      set({ savedSongs: repository.listSongs() });
+      return true;
     },
 
     newSong: () => {
@@ -649,7 +679,7 @@ let lastSessionOk = true;
 
 function buildSession(s: State): Session {
   return {
-    version: 1,
+    version: CURRENT_VERSION,
     scaleId: s.scaleId,
     tonic: s.tonic,
     accidentals: s.accidentals,

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { blockMeter } from "../../core/song";
 import type { PlaybackPattern } from "../../core/song";
+import { tapTempo } from "../../core/tempo";
 import { METERS, meterLabel, type Meter } from "../../core/timeline";
 import { selectRegion, useStore } from "../../state/store";
 import { togglePlay } from "../hooks";
@@ -24,11 +25,9 @@ export function Transport() {
 
   const tap = () => {
     const now = performance.now();
-    taps.current = [...taps.current.filter((t) => now - t < 2500), now].slice(-6);
-    if (taps.current.length >= 3) {
-      const gaps = taps.current.slice(1).map((t, i) => t - taps.current[i]);
-      setBpm(60000 / (gaps.reduce((a, b) => a + b, 0) / gaps.length));
-    }
+    const res = tapTempo(taps.current, now);
+    taps.current = res.taps;
+    if (res.bpm !== null) setBpm(res.bpm);
   };
 
   let position = "—";

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { BLOCK_COLORS, blockBeats, blockMeter, type Block } from "../../core/song";
+import { BLOCK_COLORS } from "../../core/song";
 import { TEMPLATES, type TemplateId } from "../../core/templates";
+import { arrangementLayout, blockUsage } from "../../core/view";
 import { useStore } from "../../state/store";
 import { barTicks } from "./barTicks";
 
@@ -29,17 +30,8 @@ export function Arrangement() {
   // A confirmação só vale enquanto o mesmo bloco estiver selecionado.
   const pendingRemove = confirmRemove !== null && song.arrangement[selected]?.id === confirmRemove ? confirmRemove : null;
   const removeTitle = (n: number) => (n > 1 ? "Remove só esta instância; o bloco continua nas outras" : "Remover do arranjo");
-  const usage = new Map<string, number>();
-  for (const it of song.arrangement) usage.set(it.blockId, (usage.get(it.blockId) ?? 0) + 1);
-
-  const items = song.arrangement.reduce<{ item: (typeof song.arrangement)[number]; i: number; block: Block | undefined; bars: number; start: number }[]>((acc, item, i) => {
-    const block = song.blocks[item.blockId];
-    const bars = block ? (blockBeats(block) / blockMeter(song, block)[0]) * item.repeat : 0;
-    const prev = acc[i - 1];
-    return [...acc, { item, i, block, bars, start: prev ? prev.start + prev.bars : 1 }];
-  }, []);
-  const last = items[items.length - 1];
-  const bar = last ? last.start + last.bars : 1;
+  const usage = blockUsage(song);
+  const { entries: items, end: bar } = arrangementLayout(song);
 
   return (
     <section className="arrangement" aria-label="Arranjo">

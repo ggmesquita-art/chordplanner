@@ -1,9 +1,13 @@
 // Carregamento de instrumentos (DESIGN §5.1/§7): synths, samples do smplr, plano B
 // FluidR3, cache, status/progresso e descarte LRU. Também é dono do bus master.
 
+import "./toneContext";
 import * as Tone from "tone";
 import { CacheStorage, ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
 import { getInstrumentDef, type InstrumentDef, type SmplrSource, type SynthPreset } from "./instruments";
+import { clearProgress, clearStatus, pickEviction, reportProgress, setStatus } from "./status";
+
+export { pickEviction };
 
 type RawVoice = {
   triggerAttackRelease: (notes: string[], duration: number, time?: number, velocity?: number) => unknown;
@@ -17,8 +21,6 @@ export const MAX_SAMPLED = 6;
 const MAX_SYNTHS = 8;
 /** Sem resposta dos samples neste prazo, o carregamento conta como erro (cai no plano B/synth). */
 export const LOAD_TIMEOUT_MS = 20_000;
-
-export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 // ——— Saída ————————————————————————————————————————————————————————————
 
@@ -226,8 +228,8 @@ function sampleUrls(def: InstrumentDef): Record<number, string> {
 type SmplrInstrument = ReturnType<typeof Soundfont>;
 
 type Loaded = {
+  id: string;
   voice: Voice;
-  status: LoadStatus;
   sampled: boolean;
   lastUsed: number;
   disposed: boolean;
@@ -262,8 +264,7 @@ function loadGmSampler(def: InstrumentDef, entry: Loaded) {
     clearTimeout(timer);
     entry.release?.();
     entry.release = undefined;
-    entry.status = "error";
-    notifyStatus();
+    setStatus(entry.id, "error");
   };
   const sampler = new Tone.Sampler({
     urls: sampleUrls(def),
@@ -275,8 +276,7 @@ function loadGmSampler(def: InstrumentDef, entry: Loaded) {
       settled = true;
       clearTimeout(timer);
       entry.voice = sampler;
-      entry.status = "ready";
-      notifyStatus();
+      setStatus(entry.id, "ready");
     },
     onerror: fail,
   }).connect(output());
@@ -340,42 +340,6 @@ function smplrVoice(inst: SmplrInstrument): Voice {
 }
 
 const loaded = new Map<string, Loaded>();
-const statusListeners = new Set<() => void>();
-const notifyStatus = () => statusListeners.forEach((l) => l());
-
-export function subscribeStatus(cb: () => void): () => void {
-  statusListeners.add(cb);
-  return () => statusListeners.delete(cb);
-}
-
-export function instrumentStatus(id: string): LoadStatus {
-  return loaded.get(id)?.status ?? "idle";
-}
-
-// Progresso (0–1) do download dos samples do smplr, por instrumento.
-const progress = new Map<string, number>();
-const lastProgressNotify = new Map<string, number>();
-const PROGRESS_INTERVAL_MS = 100;
-
-/** Progresso de carregamento (0–1); null quando desconhecido (synth, plano B, pronto ou erro). */
-export function instrumentProgress(id: string): number | null {
-  return progress.get(id) ?? null;
-}
-
-function clearProgress(id: string) {
-  progress.delete(id);
-  lastProgressNotify.delete(id);
-}
-
-function reportProgress(id: string, p: { loaded: number; total: number }) {
-  if (!p.total || loaded.get(id)?.status !== "loading") return;
-  const value = Math.max(0, Math.min(1, p.loaded / p.total));
-  progress.set(id, value);
-  const now = Date.now();
-  if (value < 1 && now - (lastProgressNotify.get(id) ?? 0) < PROGRESS_INTERVAL_MS) return;
-  lastProgressNotify.set(id, now);
-  notifyStatus();
-}
 
 let fallbackVoice: Voice | null = null;
 /** Synth que toca no lugar de um instrumento ainda carregando (ou que falhou). Compartilhado e permanente. */
@@ -395,35 +359,19 @@ let previewId: string | null = null;
 export const pinPlaying = (ids: Iterable<string>) => void (playingIds = new Set(ids));
 export const pinPreview = (id: string | null) => void (previewId = id);
 
-/**
- * Escolhe quem descartar: se os SAMPLEADOS passam de `max`, os menos recentemente usados
- * que não estão em uso. Synths (`sampled: false`) não entram na conta.
- */
-export function pickEviction(entries: { id: string; lastUsed: number; sampled: boolean }[], inUse: Set<string>, max: number): string[] {
-  const pool = entries.filter((e) => e.sampled);
-  const excess = pool.length - max;
-  if (excess <= 0) return [];
-  return pool
-    .filter((e) => !inUse.has(e.id))
-    .sort((a, b) => a.lastUsed - b.lastUsed)
-    .slice(0, excess)
-    .map((e) => e.id);
-}
-
 /** Descarta um instrumento: solta as notas e libera nós/instância; um novo uso recarrega (samples vêm do cache). */
 export function disposeInstrument(id: string) {
   const entry = loaded.get(id);
   if (!entry) return;
   entry.disposed = true;
   loaded.delete(id);
-  clearProgress(id);
   try {
     entry.release?.();
   } catch (err) {
     console.warn(`falha ao descartar ${id}`, err);
   }
   entry.release = undefined;
-  notifyStatus();
+  clearStatus(id);
 }
 
 function evictExcess(keep: string) {
@@ -451,16 +399,17 @@ export function ensureInstrument(id: string): Loaded {
   const def = getInstrumentDef(id);
   if (def.engine === "synth") {
     const voice = createSynth(def.source.preset ?? "poly");
-    const entry: Loaded = { voice, status: "ready", sampled: false, lastUsed: ++clock, disposed: false, release: voice.dispose };
+    const entry: Loaded = { id, voice, sampled: false, lastUsed: ++clock, disposed: false, release: voice.dispose };
     loaded.set(id, entry);
     evictExcess(id);
+    setStatus(id, "ready");
     return entry;
   }
   // Enquanto os samples carregam, um synth toca no lugar.
-  const entry: Loaded = { voice: fallback(), status: "loading", sampled: true, lastUsed: ++clock, disposed: false };
+  const entry: Loaded = { id, voice: fallback(), sampled: true, lastUsed: ++clock, disposed: false };
   loaded.set(id, entry);
   evictExcess(id);
-  notifyStatus();
+  setStatus(id, "loading");
 
   // Progresso do smplr só vale enquanto ele é a tentativa em curso (callbacks tardios são ignorados).
   let smplrActive = true;
@@ -471,10 +420,7 @@ export function ensureInstrument(id: string): Loaded {
     entry.release?.(); // descarta a instância do smplr que falhou
     entry.release = undefined;
     if (def.source.gm) loadGmSampler(def, entry);
-    else {
-      entry.status = "error";
-      notifyStatus();
-    }
+    else setStatus(id, "error");
   };
   if (!def.source.smplr) {
     fallBackToGm();
@@ -487,9 +433,8 @@ export function ensureInstrument(id: string): Loaded {
       () => {
         if (entry.disposed) return;
         entry.voice = smplrVoice(inst);
-        entry.status = "ready";
         clearProgress(id);
-        notifyStatus();
+        setStatus(id, "ready");
       },
       (err: unknown) => {
         if (entry.disposed) return;

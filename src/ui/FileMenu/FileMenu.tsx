@@ -100,8 +100,8 @@ export function FileMenu() {
       <div className="song-name">
         <input
           value={songName}
-          onChange={(e) => renameSong(e.target.value)}
-          onBlur={(e) => !e.target.value.trim() && renameSong("Sem título")}
+          onChange={(e) => !renameSong(e.target.value) && setSaveFailed(true)}
+          onBlur={(e) => !e.target.value.trim() && !renameSong("Sem título") && setSaveFailed(true)}
           aria-label="Nome da música"
           size={Math.max(8, Math.min(26, songName.length + 1))}
         />

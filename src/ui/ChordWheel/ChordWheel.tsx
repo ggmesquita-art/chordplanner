@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getQuality, makeChord, type QualityId } from "../../core/chords";
-import { chordFits, chromaticFunction, romanFor } from "../../core/diatonic";
-import { chordIntervals, chordSymbol } from "../../core/modifiers";
+import { chordSymbol } from "../../core/modifiers";
 import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
+import { WHEEL_RINGS, extraQualities, hoverChordInfo, sliceClickable, sliceState, wheelCounts, wheelSlices } from "../../core/view";
 import { useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
@@ -10,14 +10,12 @@ import { sharedPitchClasses } from "./shared";
 
 const SIZE = 560;
 const C = SIZE / 2;
-const RINGS: { quality: QualityId; r0: number; r1: number; offset: number; label: string }[] = [
-  { quality: "maj", r0: 170, r1: 240, offset: 0, label: "maiores" },
-  { quality: "m", r0: 108, r1: 170, offset: 9, label: "menores" },
-  { quality: "dim", r0: 58, r1: 108, offset: 11, label: "diminutos" },
+const RADII: [number, number][] = [
+  [170, 240],
+  [108, 170],
+  [58, 108],
 ];
-const EXTRA_QUALITIES: QualityId[] = ["aug", "sus4", "sus2", "5"];
-
-type SliceState = "explore" | "diatonic" | "chromatic" | "other" | "out";
+const RINGS = WHEEL_RINGS.map((ring, i) => ({ ...ring, r0: RADII[i][0], r1: RADII[i][1] }));
 
 const HOVER_DELAY = 250;
 
@@ -152,15 +150,7 @@ export function ChordWheel() {
     return block.chords[i >= 0 ? i : block.chords.length - 1];
   }, [block, selectedChordId]);
 
-  const stateOf = (root: PitchClass, quality: QualityId): SliceState => {
-    if (!ctx) return "explore";
-    if (chordFits(root, quality, ctx.pcSet)) return "diatonic";
-    if (chromaticFunction(ctx, root, quality)) return "chromatic";
-    if (ctx.pcSet.has(root)) return "other";
-    return "out";
-  };
-
-  const clickable = (st: SliceState) => st === "explore" || st === "diatonic" || (st === "chromatic" && mode !== "strict") || mode === "free";
+  const slices = useMemo(() => wheelSlices(ctx, mode), [ctx, mode]);
 
   const activate = (root: PitchClass, quality: QualityId) => {
     // Menu radial: devolve o foco ao badge que o abriu (o menu some ao escolher).
@@ -170,8 +160,7 @@ export function ChordWheel() {
       setTonic(root);
       return;
     }
-    const st = stateOf(root, quality);
-    if (!clickable(st)) return;
+    if (!sliceClickable(sliceState(ctx, root, quality), mode)) return;
     const chord = addChord(root, quality);
     if (chord && soundOnClick) previewChord(chord);
   };
@@ -191,14 +180,12 @@ export function ChordWheel() {
 
   const hoverInfo = useMemo(() => {
     if (!hover) return null;
-    const chord = makeChord(hover.root, hover.quality);
-    const pcs = chordIntervals(chord).map((i) => mod12(hover.root + i));
-    const prevPcs = previous ? new Set(chordIntervals(previous).map((i) => mod12(previous.root + i))) : null;
+    const info = hoverChordInfo(ctx, hover, previous);
     return {
-      symbol: chordSymbol(chord, spell),
-      roman: ctx ? chromaticFunction(ctx, hover.root, hover.quality)?.label ?? romanFor(ctx, hover.root, hover.quality) : "",
-      notes: pcs.map(spell).join(" "),
-      shared: prevPcs ? pcs.filter((pc) => prevPcs.has(pc)).map(spell) : null,
+      symbol: chordSymbol(info.chord, spell),
+      roman: info.roman,
+      notes: info.pcs.map(spell).join(" "),
+      shared: info.shared?.map(spell) ?? null,
     };
   }, [hover, previous, spell, ctx]);
 
@@ -209,20 +196,14 @@ export function ChordWheel() {
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="wheel" role="group" aria-label="Roda de acordes (círculo de quintas)">
         {RINGS.map((ring, ri) =>
           Array.from({ length: 12 }, (_, pos) => {
-            const majorRoot = mod12(pos * 7);
-            const root = mod12(majorRoot + ring.offset);
+            const { root, state: st, clickable: can, chromatic, roman, icon } = slices[ri][pos];
             const angle = pos * 30 + rotation;
-            const st = stateOf(root, ring.quality);
-            const can = clickable(st);
             const isTonic = tonic !== null && root === tonic && ctx?.degrees[0]?.primary === ring.quality;
             const isSel = selected && selected.root === root && selected.quality === ring.quality;
             const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
             const sym = chordSymbol(makeChord(root, ring.quality), spell);
-            const chromatic = st === "chromatic" && ctx ? chromaticFunction(ctx, root, ring.quality) : null;
-            const roman = st === "diatonic" && ctx ? romanFor(ctx, root, ring.quality) : chromatic?.label ?? null;
             const [lx, ly] = pt((ring.r0 + ring.r1) / 2 + (roman ? 7 : 0), angle);
             const [rx, ry] = pt((ring.r0 + ring.r1) / 2 - 13, angle);
-            const icon = st === "other" ? "◐" : st === "out" && mode === "free" ? "⚠" : "";
             return (
               <g
                 key={`${ri}-${pos}`}
@@ -266,8 +247,7 @@ export function ChordWheel() {
 
         {/* Badges: qualidades que não cabem nos 3 anéis (aug, sus, power chord). */}
         {ctx?.degrees.map((deg) => {
-          const ringQs = new Set<QualityId>(["maj", "m", "dim"]);
-          const extras = deg.qualities.filter((q) => EXTRA_QUALITIES.includes(q) && !(q === "5" && deg.qualities.some((x) => ringQs.has(x))));
+          const extras = extraQualities(deg);
           if (!extras.length) return null;
           const angle = fifthsPosition(deg.root) * 30 + rotation;
           const [bx, by] = pt(256, angle);
@@ -356,13 +336,7 @@ function WheelHint() {
   const setMode = useStore((s) => s.setMode);
   if (!ctx) return <p className="wheel-hint muted small">Clique numa fatia (ou use o seletor no topo) para definir a tônica.</p>;
 
-  let diatonic = 0;
-  let chromatic = 0;
-  for (const ring of RINGS)
-    for (let pc = 0; pc < 12; pc++) {
-      if (chordFits(pc, ring.quality, ctx.pcSet)) diatonic++;
-      else if (chromaticFunction(ctx, pc, ring.quality)) chromatic++;
-    }
+  const { diatonic, chromatic } = wheelCounts(ctx);
   const name = ctx.scale.name;
   const go = (m: "colorful" | "free", label: string) => (
     <button className="link" onClick={() => setMode(m)}>

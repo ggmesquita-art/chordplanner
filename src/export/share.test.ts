@@ -157,3 +157,12 @@ describe("conteúdo hostil (arquivo ou link de terceiros)", () => {
     expect(new Set(out.song.arrangement.map((i) => i.id)).size).toBe(256);
   });
 });
+
+describe("versão do arquivo", () => {
+  it("versão futura mantém a mensagem; versão inválida é arquivo danificado", () => {
+    const base = JSON.parse(serializeSongFile(sample()));
+    expect(errorOf(JSON.stringify({ ...base, version: 2 }))).toContain("versão mais nova");
+    expect(errorOf(JSON.stringify({ ...base, version: 0 }))).toContain("danificado");
+    expect(errorOf(JSON.stringify({ ...base, version: 1 }))).toBeNull();
+  });
+});

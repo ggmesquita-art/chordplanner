@@ -43,3 +43,72 @@ describe("withTimeout", () => {
     await expect(withTimeout(Promise.resolve(7), LOAD_TIMEOUT_MS)).resolves.toBe(7);
   });
 });
+
+// ——— Fachada (engine.ts): carregamento sob demanda do player ———
+
+describe("fachada engine", () => {
+  const fakePlayer = () => ({
+    play: vi.fn(async () => {}),
+    previewNotes: vi.fn(async () => {}),
+    stop: vi.fn(),
+    unlock: vi.fn(async () => {}),
+    preload: vi.fn(),
+    disposeInstrument: vi.fn(),
+  });
+
+  afterEach(() => {
+    vi.doUnmock("./player");
+    vi.resetModules();
+  });
+
+  const expanded = { events: [], totalSec: 0 } as never;
+  const opts = { loop: false, metronome: false, swing: 0, channelFor: () => 1, onEvent: () => {}, onEnd: () => {} };
+
+  it("delega play e previewNotes ao player", async () => {
+    vi.resetModules();
+    const p = fakePlayer();
+    vi.doMock("./player", () => p);
+    const engine = await import("./engine");
+    await engine.play(expanded, opts);
+    await engine.previewNotes([60], "piano");
+    expect(p.play).toHaveBeenCalledWith(expanded, opts);
+    expect(p.previewNotes).toHaveBeenCalledWith([60], "piano", {});
+    engine.stop();
+    expect(p.stop).toHaveBeenCalled();
+  });
+
+  it("stop() antes do player carregar não lança", async () => {
+    vi.resetModules();
+    vi.doMock("./player", () => fakePlayer());
+    const engine = await import("./engine");
+    expect(() => engine.stop()).not.toThrow();
+    expect(() => engine.disposeInstrument("x")).not.toThrow();
+  });
+
+  it("stop() entre play() e o fim do import impede o play de começar", async () => {
+    vi.resetModules();
+    const p = fakePlayer();
+    vi.doMock("./player", () => p);
+    const engine = await import("./engine");
+    const pending = engine.play(expanded, opts);
+    engine.stop();
+    await pending;
+    expect(p.play).not.toHaveBeenCalled();
+  });
+
+  it("subscribeStatus/instrumentStatus funcionam sem carregar o player", async () => {
+    vi.resetModules();
+    const factory = vi.fn(() => fakePlayer());
+    vi.doMock("./player", factory);
+    const engine = await import("./engine");
+    const status = await import("./status");
+    const cb = vi.fn();
+    const off = engine.subscribeStatus(cb);
+    expect(engine.instrumentStatus("x")).toBe("idle");
+    status.setStatus("x", "loading");
+    expect(engine.instrumentStatus("x")).toBe("loading");
+    expect(cb).toHaveBeenCalled();
+    off();
+    expect(factory).not.toHaveBeenCalled();
+  });
+});

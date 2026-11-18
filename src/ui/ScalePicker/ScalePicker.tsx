@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { previewNotes } from "../../audio/engine";
-import { makeSpeller, mod12 } from "../../core/pitch";
-import { FAMILY_NAMES, getScale, pitchSet, relativeModes, scaleFormula, searchScales, type ScaleDef, type ScaleFamily } from "../../core/scales";
+import { FAMILY_NAMES, getScale, relativeModes, searchScales, type ScaleDef, type ScaleFamily } from "../../core/scales";
+import { relativeTonic, scalePreviewNotes, scalePreviewText } from "../../core/view";
 import { useStore } from "../../state/store";
 import { currentInstrument } from "../hooks";
 import { useListbox } from "../useListbox";
@@ -40,8 +40,7 @@ export function ScalePicker() {
   const flat = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   const previewTonic = tonic ?? 0;
   const playScale = (sc: ScaleDef) => {
-    const base = 60 + previewTonic;
-    void previewNotes([...sc.intervals.map((i) => base + i), base + 12], currentInstrument(), { arpeggio: true });
+    void previewNotes(scalePreviewNotes(previewTonic, sc), currentInstrument(), { arpeggio: true });
   };
 
   const choose = (sc: ScaleDef) => {
@@ -58,16 +57,13 @@ export function ScalePicker() {
     onNavigate: () => setHover(null),
   });
   const shown = hover ?? flat[Math.min(lb.active, flat.length - 1)] ?? scale;
-  const spell = makeSpeller(previewTonic, pitchSet(previewTonic, shown), accidentals);
-  const notes = pitchSet(previewTonic, shown).map(spell).join(" ");
+  const { formula, notes } = scalePreviewText(previewTonic, shown, accidentals);
 
   const relatives = relativeModes(scale).filter((m) => m.id !== scale.id);
   const toRelative = (target: ScaleDef) => {
     if (tonic === null) return setScale(target.id);
     // Mesma coleção de notas: a tônica passa a ser o grau correspondente da escala-mãe.
-    const parent = getScale(scale.mode?.parent ?? scale.id);
-    const parentTonic = mod12(tonic - parent.intervals[(scale.mode?.degree ?? 1) - 1]);
-    setKey(mod12(parentTonic + parent.intervals[(target.mode?.degree ?? 1) - 1]), target.id);
+    setKey(relativeTonic(tonic, scale, target), target.id);
   };
 
   return (
@@ -116,7 +112,7 @@ export function ScalePicker() {
             <aside className="scale-preview">
               <div className="preview-name">{shown.name}</div>
               {shown.aliases && <div className="muted small">{shown.aliases.join(" · ")}</div>}
-              <div className="formula">{scaleFormula(shown)}</div>
+              <div className="formula">{formula}</div>
               <div className="preview-notes">{notes}</div>
               {shown.approx && <div className="warn small">⚠ Não temperada — aproximação em 12-TET.</div>}
               <button className="btn" onClick={() => playScale(shown)}>▶ Ouvir escala</button>

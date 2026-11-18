@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTRUMENTS, hasInstrument } from "../audio/instruments";
 import { FAMILY_SUGGESTIONS, SCALE_SUGGESTIONS, suggestionsFor } from "../audio/scaleInstruments";
 import { SCALES } from "../core/scales";
@@ -276,5 +276,99 @@ describe("store", () => {
     expect(useStore.getState().playScope).toBe("region");
     useStore.getState().selectChord(ids[1]);
     expect(useStore.getState().playScope).toBe("block");
+  });
+});
+
+describe("hash de conteúdo sem ids", () => {
+  const base = () => {
+    const song = makeSong();
+    const block = Object.values(song.blocks)[0];
+    block.chords.push({ id: "c1", root: 0, quality: "maj", modifiers: [], duration: 4 }, { id: "c2", root: 7, quality: "maj", modifiers: [], duration: 4 });
+    return { scaleId: "major", tonic: 0, song };
+  };
+
+  it("conteúdo sem ids em acordes/itens tem o mesmo hash após sanitizeContent", () => {
+    const orig = base();
+    const stripped = structuredClone(orig);
+    for (const b of Object.values(stripped.song.blocks)) for (const c of b.chords) delete (c as { id?: string }).id;
+    for (const it of stripped.song.arrangement) delete (it as { id?: string }).id;
+    const clean = sanitizeContent(stripped)!;
+    expect(contentHash(clean)).toBe(contentHash(orig));
+  });
+
+  it("mudar uma fundamental muda o hash", () => {
+    const orig = base();
+    const changed = structuredClone(orig);
+    Object.values(changed.song.blocks)[0].chords[0].root = 2;
+    expect(contentHash(changed)).not.toBe(contentHash(orig));
+  });
+});
+
+describe("coalescência do histórico", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    useStore.getState().newSong();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("duas chamadas de setBpm em 300 ms viram um passo, com o estado inicial preservado", () => {
+    const before = useStore.getState().song.bpm;
+    useStore.getState().setBpm(30);
+    vi.advanceTimersByTime(300);
+    useStore.getState().setBpm(300);
+    expect(useStore.getState().past).toHaveLength(1);
+    expect(useStore.getState().song.bpm).toBe(300);
+    useStore.getState().undo();
+    expect(useStore.getState().song.bpm).toBe(before);
+  });
+
+  it("com 1,5 s de intervalo são dois passos", () => {
+    useStore.getState().setBpm(100);
+    vi.advanceTimersByTime(1500);
+    useStore.getState().setBpm(120);
+    expect(useStore.getState().past).toHaveLength(2);
+  });
+
+  it("setBpm seguido de setSwing são dois passos", () => {
+    useStore.getState().setBpm(100);
+    useStore.getState().setSwing(30);
+    expect(useStore.getState().past).toHaveLength(2);
+  });
+
+  it("desfazer no meio quebra a coalescência", () => {
+    useStore.getState().setBpm(100);
+    useStore.getState().undo();
+    useStore.getState().setBpm(110);
+    useStore.getState().undo();
+    useStore.getState().setBpm(120);
+    expect(useStore.getState().past).toHaveLength(1);
+    useStore.getState().setBpm(130);
+    expect(useStore.getState().past).toHaveLength(1);
+  });
+
+  it("setBlockProps só com bpm coalesce; com outro campo, não", () => {
+    const id = Object.keys(useStore.getState().song.blocks)[0];
+    useStore.getState().setBlockProps(id, { bpm: 100 });
+    useStore.getState().setBlockProps(id, { bpm: 110 });
+    expect(useStore.getState().past).toHaveLength(1);
+    useStore.getState().setBlockProps(id, { pattern: "arp-up" });
+    useStore.getState().setBlockProps(id, { pattern: "comping" });
+    expect(useStore.getState().past).toHaveLength(3);
+  });
+});
+
+describe("renameSong", () => {
+  it("devolve false se a gravação falha, mantendo o nome na tela e a lista", () => {
+    useStore.getState().newSong();
+    useStore.getState().renameSong("Um");
+    expect(useStore.getState().saveSong()).toBe(true);
+    const list = useStore.getState().savedSongs;
+    vi.spyOn(repository, "saveSong").mockReturnValue(false);
+    expect(useStore.getState().renameSong("Dois")).toBe(false);
+    expect(useStore.getState().songName).toBe("Dois");
+    expect(useStore.getState().savedSongs).toEqual(list);
+    vi.restoreAllMocks();
+    expect(useStore.getState().renameSong("Tres")).toBe(true);
   });
 });

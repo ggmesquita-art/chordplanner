@@ -11,8 +11,7 @@ import {
   sameModifier,
   type NoteStatus,
 } from "../../core/modifiers";
-import { mod12 } from "../../core/pitch";
-import { fitToRange, voiceChord } from "../../core/voicing";
+import { chordNoteList, currentInversion, midiStatus, voicedInRange } from "../../core/view";
 import { selectChord, useStore } from "../../state/store";
 import { currentInstrument, previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { MiniKeyboard } from "../MiniKeyboard/MiniKeyboard";
@@ -126,7 +125,7 @@ export function ModifierPanel() {
   };
 
   const invCount = Math.min(inversionCount(chord), ORDINAL.length);
-  const currentInversion = chord.bass === undefined ? 0 : [...Array(invCount).keys()].find((n) => n > 0 && inversionBass(chord, n) === chord.bass) ?? -1;
+  const inversion = currentInversion(chord, invCount);
 
   const setBass = (bass: number | undefined) => {
     actions.setBass(chord.id, bass);
@@ -135,8 +134,8 @@ export function ModifierPanel() {
   };
 
   const def = getInstrumentDef(currentInstrument());
-  const voiced = fitToRange(voiceChord(chord), def.range);
-  const statusByPc = new Map(resolved.pcs.map((pc, i) => [pc, resolved.status[i]]));
+  const voiced = voicedInRange(chord, def.range);
+  const noteList = chordNoteList(chord, resolved);
 
   return (
     <section ref={panel} className={`modifiers ${open ? "open" : ""}`} aria-label="Modificadores">
@@ -187,7 +186,7 @@ export function ModifierPanel() {
         <legend>Baixo / Inversão</legend>
         <div className="mod-buttons">
           {Array.from({ length: invCount }, (_, n) => (
-            <button key={n} className={`mod plain ${currentInversion === n ? "active" : ""}`} aria-pressed={currentInversion === n} onClick={() => setBass(inversionBass(chord, n))}>
+            <button key={n} className={`mod plain ${inversion === n ? "active" : ""}`} aria-pressed={inversion === n} onClick={() => setBass(inversionBass(chord, n))}>
               {ORDINAL[n]}
             </button>
           ))}
@@ -230,12 +229,12 @@ export function ModifierPanel() {
 
       <div className="notes-line">
         <span className="muted small">Notas:</span>
-        {resolved.pcs.map((pc, i) => (
-          <span key={i} className={`note ${resolved.status[i]}`} title={STATUS_TEXT[resolved.status[i]]}>
-            {resolved.status[i] === "diatonic" ? spell(pc) : `(${spell(pc)})`}
+        {noteList.notes.map(({ pc, status }, i) => (
+          <span key={i} className={`note ${status}`} title={STATUS_TEXT[status]}>
+            {status === "diatonic" ? spell(pc) : `(${spell(pc)})`}
           </span>
         ))}
-        {chord.bass !== undefined && !resolved.pcs.includes(mod12(chord.bass)) && <span className="note">/ {spell(chord.bass)}</span>}
+        {noteList.extraBass !== null && <span className="note">/ {spell(noteList.extraBass)}</span>}
       </div>
       <div className="legend small">
         <span>
@@ -249,7 +248,7 @@ export function ModifierPanel() {
         </span>
       </div>
 
-      <MiniKeyboard notes={voiced.notes} status={(midi) => statusByPc.get(mod12(midi)) ?? "diatonic"} />
+      <MiniKeyboard notes={voiced.notes} status={(midi) => midiStatus(resolved, midi)} />
       {voiced.dropped > 0 && <div className="warn small">⚠ {voiced.dropped} nota(s) fora da tessitura de {def.name}.</div>}
 
       <Presets />

@@ -75,3 +75,26 @@ describe("LocalSongRepository", () => {
     expect(repo.listSongs()).toEqual([{ id: "a", name: "Sem título", updatedAt: 0, scaleId: "major", tonic: null }]);
   });
 });
+
+describe("versão do formato", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("sessão com versão futura ou inválida é descartada", () => {
+    const repo = new LocalSongRepository();
+    for (const version of [2, 0, "1"]) {
+      localStorage.setItem("chordplanner:session", JSON.stringify({ ...session(), version }));
+      expect(repo.loadSession()).toBeNull();
+    }
+  });
+
+  it("músicas salvas ganham version ao gravar; sem campo conta como versão 1", () => {
+    const repo = new LocalSongRepository();
+    const song = makeSong();
+    expect(repo.saveSong({ id: "a", name: "A", updatedAt: 1, version: 1, scaleId: "major", tonic: 0, song })).toBe(true);
+    expect(JSON.parse(localStorage.getItem("chordplanner:songs")!).a.version).toBe(1);
+    localStorage.setItem("chordplanner:songs", JSON.stringify({ b: { id: "b", name: "B", updatedAt: 2, scaleId: "major", tonic: 0, song }, c: { id: "c", name: "C", updatedAt: 3, version: 99, scaleId: "major", tonic: 0, song } }));
+    expect(repo.loadSong("b")?.version).toBe(1);
+    expect(repo.loadSong("c")).toBeNull();
+    expect(repo.listSongs().map((m) => m.id)).toEqual(["b"]);
+  });
+});

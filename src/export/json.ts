@@ -7,9 +7,10 @@ import type { Modifier } from "../core/modifiers";
 import { SCALES } from "../core/scales";
 import { BLOCK_COLORS, newId, type ArrangementItem, type Block, type PlaybackPattern, type Song } from "../core/song";
 import { METERS, type Meter } from "../core/timeline";
+import { CURRENT_VERSION, migrate } from "./migrate";
 
 export type SongContent = { scaleId: string; tonic: number | null; song: Song };
-export type SongFile = SongContent & { format: "chordplanner-song"; version: 1; name: string };
+export type SongFile = SongContent & { format: "chordplanner-song"; version: number; name: string };
 
 export class SongFileError extends Error {}
 
@@ -158,7 +159,7 @@ export function sanitizeContent(input: unknown): SongContent | null {
 }
 
 export function toSongFile(data: SongContent & { name: string }): SongFile {
-  return { format: "chordplanner-song", version: 1, name: data.name, scaleId: data.scaleId, tonic: data.tonic, song: data.song };
+  return { format: "chordplanner-song", version: CURRENT_VERSION, name: data.name, scaleId: data.scaleId, tonic: data.tonic, song: data.song };
 }
 
 export function serializeSongFile(file: SongFile, pretty = false): string {
@@ -174,8 +175,12 @@ export function parseSongFile(text: string): SongFile {
     throw new SongFileError("O arquivo não é um JSON válido.");
   }
   if (!isObj(raw) || raw.format !== "chordplanner-song") throw new SongFileError("Este arquivo não é uma música do ChordPlanner.");
-  if (typeof raw.version === "number" && raw.version > 1) throw new SongFileError("Arquivo criado por uma versão mais nova do ChordPlanner.");
-  const content = sanitizeContent(raw);
+  // Arquivo sem versão numérica: formato 1.
+  const version = typeof raw.version === "number" ? raw.version : 1;
+  if (version > CURRENT_VERSION) throw new SongFileError("Arquivo criado por uma versão mais nova do ChordPlanner.");
+  const migrated = migrate(raw, version);
+  if (!migrated) throw new SongFileError("O arquivo está danificado ou incompleto.");
+  const content = sanitizeContent(migrated.data);
   if (!content) throw new SongFileError("O arquivo está danificado ou incompleto.");
   const name = (typeof raw.name === "string" ? raw.name.trim() : "").slice(0, MAX_NAME).trim() || "Sem título";
   return toSongFile({ ...content, name });
