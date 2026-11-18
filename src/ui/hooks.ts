@@ -6,11 +6,18 @@ import type { Chord } from "../core/chords";
 import { makeSpeller, type Speller } from "../core/pitch";
 import { expandArrangement, expandRegion } from "../core/song";
 import { voiceChord } from "../core/voicing";
-import { flushSession, selectBlock, selectCtx, selectRegion, sessionAtRisk, useStore } from "../state/store";
+import { scaleContext } from "../core/diatonic";
+import { blockKey, flushSession, selectBlock, selectRegion, sessionAtRisk, useStore } from "../state/store";
 
+/** Contexto de escala do bloco selecionado: a tonalidade do bloco (modulação) ou a global. */
 export function useCtx() {
-  const { tonic, scaleId } = useStore(useShallow((s) => ({ tonic: s.tonic, scaleId: s.scaleId })));
-  return useMemo(() => selectCtx({ tonic, scaleId }), [tonic, scaleId]);
+  const { tonic, scaleId } = useStore(
+    useShallow((s) => {
+      const key = blockKey(s, selectBlock(s));
+      return { tonic: key?.tonic ?? null, scaleId: key?.scaleId ?? s.scaleId };
+    }),
+  );
+  return useMemo(() => (tonic === null ? null : scaleContext(tonic, scaleId)), [tonic, scaleId]);
 }
 
 export function useSpeller(): Speller {
@@ -60,7 +67,10 @@ export async function togglePlay() {
     metronome: s.metronome,
     countIn: s.countIn,
     swing: s.song.swing,
-    tonicFor: () => useStore.getState().tonic,
+    tonicFor: (blockId) => {
+      const st = useStore.getState();
+      return blockKey(st, st.song.blocks[blockId])?.tonic ?? null;
+    },
     reattack: s.song.reattack,
     voiceLeading: s.song.voiceLeading,
     onEvent: (i) => {

@@ -73,6 +73,8 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   soundOnHover: boolean;
   /** Outra ponta da região selecionada (id de acorde do bloco atual); a primeira é `selectedChord`. */
   regionEnd: string | null;
+  /** A progressão edita a casa 2 do bloco (`block.ending`) em vez dos acordes principais. */
+  editEnding: boolean;
   songId: string | null;
   songName: string;
   savedHash: string | null;
@@ -107,6 +109,10 @@ type Actions = {
   setTheme: (t: Theme) => void;
   /** Estende a seleção até este acorde do bloco atual (null desfaz a região). */
   setRegionEnd: (id: string | null) => void;
+  /** Alterna a edição entre os acordes do bloco e a casa 2. */
+  setEditEnding: (v: boolean) => void;
+  /** Remove a casa 2 do bloco selecionado. */
+  clearEnding: () => void;
   setLoop: (v: boolean) => void;
   setPlayScope: (s: PlayScope) => void;
   setPlaying: (p: boolean) => void;
@@ -193,6 +199,7 @@ function initialState(): State {
     showDegrees,
     soundOnHover,
     regionEnd: null,
+    editEnding: false,
     // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
     midi: { ...DEFAULT_MIDI, ...midi, enabled: false },
     songId,
@@ -217,16 +224,35 @@ function initialState(): State {
 export const selectCtx = (s: Pick<State, "tonic" | "scaleId">): ScaleContext | null =>
   s.tonic === null ? null : scaleContext(s.tonic, s.scaleId);
 
+/** Tonalidade efetiva de um bloco (§3.8): a própria (modulação) ou a global. null = sem tônica. */
+export function blockKey(s: Pick<State, "tonic" | "scaleId">, block: Pick<Block, "key"> | null | undefined): { tonic: number; scaleId: string } | null {
+  if (block?.key) return block.key;
+  return s.tonic === null ? null : { tonic: s.tonic, scaleId: s.scaleId };
+}
+
+/** Contexto de escala do bloco selecionado (considera a modulação do bloco). */
+export function selectBlockCtx(s: Pick<State, "tonic" | "scaleId" | "song" | "selectedItem">): ScaleContext | null {
+  const key = blockKey(s, selectBlock(s));
+  return key ? scaleContext(key.tonic, key.scaleId) : null;
+}
+
+/** Acordes que a progressão está editando: os do bloco ou os da casa 2. */
+export function selectEditChords(s: Pick<State, "song" | "selectedItem" | "editEnding">): Chord[] {
+  const block = selectBlock(s);
+  if (!block) return [];
+  return s.editEnding ? (block.ending ?? []) : block.chords;
+}
+
 export const selectBlock = (s: Pick<State, "song" | "selectedItem">): Block | null => {
   const item = s.song.arrangement[s.selectedItem] ?? s.song.arrangement[0];
   return item ? s.song.blocks[item.blockId] ?? null : null;
 };
 
-export const selectChord = (s: State): Chord | null =>
-  selectBlock(s)?.chords.find((c) => c.id === s.selectedChord) ?? null;
+export const selectChord = (s: State): Chord | null => selectEditChords(s).find((c) => c.id === s.selectedChord) ?? null;
 
 /** Região selecionada no bloco atual: índices (inclusivos, em ordem) dos acordes, ou null se não houver. */
-export function selectRegion(s: Pick<State, "song" | "selectedItem" | "selectedChord" | "regionEnd">): { from: number; to: number } | null {
+export function selectRegion(s: Pick<State, "song" | "selectedItem" | "selectedChord" | "regionEnd"> & { editEnding?: boolean }): { from: number; to: number } | null {
+  if (s.editEnding) return null;
   const chords = selectBlock(s)?.chords;
   if (!chords || s.selectedChord === null || s.regionEnd === null) return null;
   const a = chords.findIndex((c) => c.id === s.selectedChord);
@@ -237,9 +263,10 @@ export function selectRegion(s: Pick<State, "song" | "selectedItem" | "selectedC
 // ——— Helpers ————————————————————————————————————————————————————————
 
 function tonicChordFor(s: Pick<State, "tonic" | "scaleId" | "song">, block: Block): Chord | null {
-  if (s.tonic === null) return null;
-  const q = tonicChord(scaleContext(s.tonic, s.scaleId));
-  return q ? makeChord(s.tonic, q, (block.meter ?? s.song.meter)[0]) : null;
+  const key = blockKey(s, block);
+  if (!key) return null;
+  const q = tonicChord(scaleContext(key.tonic, key.scaleId));
+  return q ? makeChord(key.tonic, q, (block.meter ?? s.song.meter)[0]) : null;
 }
 
 function cloneBlock(b: Block, name: string): Block {
@@ -250,7 +277,8 @@ function cloneBlock(b: Block, name: string): Block {
 function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord" | "regionEnd"> {
   const selectedItem = Math.max(0, Math.min(s.selectedItem, song.arrangement.length - 1));
   const block = selectBlock({ song, selectedItem });
-  const keep = s.selectedChord !== null && !!block?.chords.some((c) => c.id === s.selectedChord);
+  const list = s.editEnding ? (block?.ending ?? []) : (block?.chords ?? []);
+  const keep = s.selectedChord !== null && list.some((c) => c.id === s.selectedChord);
   return { selectedItem, selectedChord: keep ? s.selectedChord : null, regionEnd: null };
 }
 
@@ -286,9 +314,23 @@ export const useStore = create<Store>()((set, get) => {
     return item ? song.blocks[item.blockId] ?? null : null;
   };
 
+  /** Lista que as ações de edição alteram (acordes do bloco ou casa 2); `create` cria a casa 2 se faltar. */
+  const editList = (song: Song, s: State, create = false): Chord[] | null => {
+    const b = currentBlock(song, s);
+    if (!b) return null;
+    if (!s.editEnding) return b.chords;
+    if (!b.ending && create) b.ending = [];
+    return b.ending ?? null;
+  };
+  /** Casa 2 vazia não é guardada. */
+  const tidyEnding = (song: Song, s: State) => {
+    const b = currentBlock(song, s);
+    if (b?.ending && !b.ending.length) delete b.ending;
+  };
+
   const editChord = (id: string, fn: (c: Chord) => void) =>
     commit((song, s) => {
-      const c = currentBlock(song, s)?.chords.find((x) => x.id === id);
+      const c = editList(song, s)?.find((x) => x.id === id);
       if (c) fn(c);
     });
 
@@ -310,11 +352,14 @@ export const useStore = create<Store>()((set, get) => {
         const delta = pc - s.tonic;
         commit(
           (song) => {
-            for (const b of Object.values(song.blocks))
-              for (const c of b.chords) {
+            for (const b of Object.values(song.blocks)) {
+              for (const c of [...b.chords, ...(b.ending ?? [])]) {
                 c.root = mod12(c.root + delta);
                 if (c.bass !== undefined) c.bass = mod12(c.bass + delta);
               }
+              // Modulações acompanham: a relação entre as tonalidades se mantém.
+              if (b.key) b.key = { ...b.key, tonic: mod12(b.key.tonic + delta) };
+            }
           },
           { tonic: pc },
         );
@@ -322,7 +367,7 @@ export const useStore = create<Store>()((set, get) => {
       }
       // Primeira definição: um único commit (tônica + acorde da tônica, se for o caso).
       const block = selectBlock(s);
-      const chord = block && !block.chords.length && !s.startWithSelected ? tonicChordFor({ ...s, tonic: pc }, block) : null;
+      const chord = block && !block.key && !block.chords.length && !s.startWithSelected ? tonicChordFor({ ...s, tonic: pc }, block) : null;
       commit(
         (song, st) => {
           if (chord) currentBlock(song, st)!.chords.push(chord);
@@ -357,7 +402,7 @@ export const useStore = create<Store>()((set, get) => {
       // Muda o bloco exibido; mantém a seleção só se o acorde existir no novo bloco.
       const item = s.song.arrangement[playhead.itemIndex];
       const keep = item && s.song.blocks[item.blockId]?.chords.some((c) => c.id === s.selectedChord);
-      set({ playhead, selectedItem: playhead.itemIndex, selectedChord: keep ? s.selectedChord : null, regionEnd: null });
+      set({ playhead, selectedItem: playhead.itemIndex, selectedChord: keep ? s.selectedChord : null, regionEnd: null, editEnding: false });
     },
     setFollowPlayback: (followPlayback) => set({ followPlayback }),
     setMidi: (patch) => set({ midi: { ...get().midi, ...patch } }),
@@ -369,9 +414,9 @@ export const useStore = create<Store>()((set, get) => {
       const chord = makeChord(root, quality, (block.meter ?? s.song.meter)[0]);
       commit(
         (song, st) => {
-          const b = currentBlock(song, st)!;
-          const at = b.chords.findIndex((c) => c.id === st.selectedChord);
-          b.chords.splice(at >= 0 ? at + 1 : b.chords.length, 0, chord);
+          const list = editList(song, st, true)!;
+          const at = list.findIndex((c) => c.id === st.selectedChord);
+          list.splice(at >= 0 ? at + 1 : list.length, 0, chord);
         },
         { selectedChord: chord.id },
       );
@@ -379,12 +424,23 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     selectChord: (selectedChord) => set({ selectedChord, regionEnd: null }),
+    setEditEnding: (editEnding) => set({ editEnding, selectedChord: null, regionEnd: null }),
+    clearEnding: () =>
+      commit(
+        (song, s) => {
+          const b = currentBlock(song, s);
+          if (b) delete b.ending;
+        },
+        { selectedChord: null, editEnding: false },
+      ),
 
     removeChord: (id) =>
       commit(
         (song, s) => {
-          const b = currentBlock(song, s);
-          if (b) b.chords = b.chords.filter((c) => c.id !== id);
+          const list = editList(song, s);
+          const i = list?.findIndex((c) => c.id === id) ?? -1;
+          if (list && i >= 0) list.splice(i, 1);
+          tidyEnding(song, s);
         },
         get().selectedChord === id ? { selectedChord: null } : {},
       ),
@@ -393,9 +449,9 @@ export const useStore = create<Store>()((set, get) => {
       const copyId = newChordId();
       commit(
         (song, s) => {
-          const b = currentBlock(song, s);
-          const i = b?.chords.findIndex((c) => c.id === id) ?? -1;
-          if (b && i >= 0) b.chords.splice(i + 1, 0, { ...structuredClone(b.chords[i]), id: copyId });
+          const list = editList(song, s);
+          const i = list?.findIndex((c) => c.id === id) ?? -1;
+          if (list && i >= 0) list.splice(i + 1, 0, { ...structuredClone(list[i]), id: copyId });
         },
         { selectedChord: copyId },
       );
@@ -403,10 +459,10 @@ export const useStore = create<Store>()((set, get) => {
 
     moveChord: (from, to) =>
       commit((song, s) => {
-        const b = currentBlock(song, s);
-        if (!b || from === to) return;
-        const [c] = b.chords.splice(from, 1);
-        b.chords.splice(to, 0, c);
+        const list = editList(song, s);
+        if (!list || from === to) return;
+        const [c] = list.splice(from, 1);
+        list.splice(to, 0, c);
       }),
 
     setDuration: (id, beats) => editChord(id, (c) => void (c.duration = Math.max(0.5, beats))),
@@ -422,6 +478,10 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       const block = selectBlock(s);
       if (!block) return;
+      if (s.editEnding) {
+        commit((song, st) => void delete currentBlock(song, st)!.ending, { selectedChord: null });
+        return;
+      }
       const chord = s.startWithSelected ? null : tonicChordFor(s, block);
       commit((song, st) => void (currentBlock(song, st)!.chords = chord ? [chord] : []), { selectedChord: chord?.id ?? null });
     },
@@ -439,9 +499,11 @@ export const useStore = create<Store>()((set, get) => {
     applyPreset: (preset) =>
       commit((song, s) => {
         const b = currentBlock(song, s);
-        const ctx = selectCtx(s);
-        if (!b) return;
-        for (const c of b.chords) {
+        const key = blockKey(s, b);
+        const ctx = key ? scaleContext(key.tonic, key.scaleId) : null;
+        const list = editList(song, s);
+        if (!b || !list) return;
+        for (const c of list) {
           const has = (iv: number) => (ctx ? ctx.pcSet.has(mod12(c.root + iv)) : true);
           const exts = c.modifiers.filter((m) => m.kind === "ext");
           const hasSeventh = exts.some((m) => m.value === 7 || m.value === "maj7");
@@ -469,7 +531,7 @@ export const useStore = create<Store>()((set, get) => {
         }
       }),
 
-    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null, regionEnd: null }),
+    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null, regionEnd: null, editEnding: false }),
 
     addBlock: () => {
       const s = get();
@@ -627,6 +689,7 @@ export const useStore = create<Store>()((set, get) => {
         selectedItem: 0,
         selectedChord: null,
         regionEnd: null,
+        editEnding: false,
         past: [],
         future: [],
         playhead: null,
@@ -646,6 +709,7 @@ export const useStore = create<Store>()((set, get) => {
         selectedItem: 0,
         selectedChord: null,
         regionEnd: null,
+        editEnding: false,
         past: [],
         future: [],
         playhead: null,
@@ -666,6 +730,7 @@ export const useStore = create<Store>()((set, get) => {
         selectedItem: 0,
         selectedChord: null,
         regionEnd: null,
+        editEnding: false,
         past: [],
         future: [],
         playhead: null,
@@ -764,8 +829,9 @@ useStore.subscribe(() => {
 });
 
 /** O acorde cabe na escala atual? (sem tônica, tudo cabe) */
-export function chordInScale(s: Pick<State, "tonic" | "scaleId">, c: Pick<Chord, "root" | "quality">): boolean {
-  const ctx = selectCtx(s);
+export function chordInScale(s: Pick<State, "tonic" | "scaleId">, c: Pick<Chord, "root" | "quality">, block?: Pick<Block, "key"> | null): boolean {
+  const key = blockKey(s, block);
+  const ctx = key ? scaleContext(key.tonic, key.scaleId) : null;
   return !ctx || chordFits(c.root, c.quality, ctx.pcSet);
 }
 

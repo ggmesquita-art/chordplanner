@@ -4,7 +4,7 @@ import { CATEGORY_NAMES, INSTRUMENTS, getInstrumentDef, type InstrumentCategory,
 import { suggestionsFor } from "../../audio/scaleInstruments";
 import { getScale } from "../../core/scales";
 import { previewChordNotes } from "../../core/view";
-import { selectChord, selectCtx, useStore } from "../../state/store";
+import { selectBlockCtx, selectChord, useStore } from "../../state/store";
 import { useInstrumentProgress, useInstrumentStatus } from "../hooks";
 import { useListbox } from "../useListbox";
 import { usePopover } from "../usePopover";
@@ -33,7 +33,7 @@ function StatusDot({ id }: { id: string }) {
 
 function previewInstrument(id: string) {
   const s = useStore.getState();
-  void previewNotes(previewChordNotes(selectChord(s), s.tonic, selectCtx(s)), id);
+  void previewNotes(previewChordNotes(selectChord(s), selectBlockCtx(s)?.tonic ?? null, selectBlockCtx(s)), id);
 }
 
 function Row({ def, id, selected, cursor, onPick }: { def: InstrumentDef; id: string; selected: boolean; cursor: boolean; onPick: (id: string) => void }) {

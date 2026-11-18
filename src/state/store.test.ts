@@ -5,7 +5,7 @@ import { SCALES } from "../core/scales";
 import { makeSong } from "../core/song";
 import { sanitizeContent } from "../export/json";
 import { repository } from "./repository";
-import { contentHash, normalizeHash, selectBlock, selectDirty, selectRegion, useStore } from "./store";
+import { blockKey, contentHash, normalizeHash, selectBlock, selectBlockCtx, selectDirty, selectEditChords, selectRegion, useStore } from "./store";
 
 describe("instrumentos (§5.2–5.3)", () => {
   it("ids únicos e tessituras válidas", () => {
@@ -391,5 +391,48 @@ describe("renameSong", () => {
     expect(b().chords[0].voicing).toBe("drop2");
     useStore.getState().setVoicing(chordId, "closed");
     expect(b().chords[0].voicing).toBeUndefined();
+  });
+
+  it("modulação: contexto do bloco, acorde da tônica do bloco e transposição que leva as tonalidades junto", () => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+    st.addBlock();
+    const id = selectBlock(useStore.getState())!.id;
+    useStore.getState().setBlockProps(id, { key: { tonic: 4, scaleId: "dorian" } });
+    expect(selectBlockCtx(useStore.getState())!.tonic).toBe(4);
+    expect(blockKey(useStore.getState(), selectBlock(useStore.getState()))).toEqual({ tonic: 4, scaleId: "dorian" });
+    useStore.getState().clearBlock();
+    expect(selectBlock(useStore.getState())!.chords.map((c) => [c.root, c.quality])).toEqual([[4, "m"]]);
+    useStore.getState().setTonic(2);
+    expect(selectBlock(useStore.getState())!.key).toEqual({ tonic: 6, scaleId: "dorian" });
+    expect(selectBlock(useStore.getState())!.chords[0].root).toBe(6);
+    useStore.getState().selectItem(0);
+    expect(selectBlockCtx(useStore.getState())!.tonic).toBe(2);
+  });
+
+  it("casa 2: as ações de edição atuam na casa 2 e a casa vazia some", () => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+    useStore.getState().setEditEnding(true);
+    useStore.getState().addChord(7, "maj");
+    useStore.getState().addChord(0, "maj");
+    let b = selectBlock(useStore.getState())!;
+    expect(b.chords.map((c) => c.root)).toEqual([0]);
+    expect(b.ending!.map((c) => c.root)).toEqual([7, 0]);
+    expect(selectEditChords(useStore.getState()).length).toBe(2);
+    const id = b.ending![0].id;
+    useStore.getState().setDuration(id, 2);
+    useStore.getState().moveChord(0, 1);
+    b = selectBlock(useStore.getState())!;
+    expect(b.ending!.map((c) => [c.root, c.duration])).toEqual([[0, 4], [7, 2]]);
+    for (const c of b.ending!) useStore.getState().removeChord(c.id);
+    expect(selectBlock(useStore.getState())!.ending).toBeUndefined();
+    useStore.getState().addChord(5, "maj");
+    useStore.getState().selectItem(0);
+    expect(useStore.getState().editEnding).toBe(false);
+    useStore.getState().clearEnding();
+    expect(selectBlock(useStore.getState())!.ending).toBeUndefined();
   });
 });
