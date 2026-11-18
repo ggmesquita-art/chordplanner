@@ -1,22 +1,11 @@
 import type { AccidentalPref } from "../core/pitch";
 import { useStore } from "../state/store";
-import type { RestrictionMode } from "../state/repository";
+import type { RestrictionMode, Theme } from "../state/repository";
 import { useSpeller } from "./hooks";
 import { FileMenu } from "./FileMenu/FileMenu";
 import { InstrumentPicker } from "./InstrumentPicker/InstrumentPicker";
 import { ScalePicker } from "./ScalePicker/ScalePicker";
-
-function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: [T, string, string?][]; onChange: (v: T) => void; label: string }) {
-  return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
-      {options.map(([v, text, title]) => (
-        <button key={v} role="radio" aria-checked={value === v} className={value === v ? "on" : ""} title={title} onClick={() => onChange(v)}>
-          {text}
-        </button>
-      ))}
-    </div>
-  );
-}
+import { Segmented } from "./Segmented";
 
 export function Header() {
   const tonic = useStore((s) => s.tonic);
@@ -25,6 +14,8 @@ export function Header() {
   const setAccidentals = useStore((s) => s.setAccidentals);
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
   const spell = useSpeller();
 
   return (
@@ -50,9 +41,9 @@ export function Header() {
         value={accidentals}
         onChange={setAccidentals}
         options={[
-          ["auto", "Auto", "Grafia automática pela escala"],
-          ["sharp", "♯", "Forçar sustenidos"],
-          ["flat", "♭", "Forçar bemóis"],
+          { value: "auto", text: "Auto", title: "Grafia automática pela escala" },
+          { value: "sharp", text: "♯", title: "Forçar sustenidos" },
+          { value: "flat", text: "♭", title: "Forçar bemóis" },
         ]}
       />
       <Segmented<RestrictionMode>
@@ -60,12 +51,22 @@ export function Header() {
         value={mode}
         onChange={setMode}
         options={[
-          ["strict", "Estrito", "Só acordes diatônicos e modificadores verdes"],
-          ["colorful", "Colorido", "Acordes diatônicos + tensões idiomáticas (âmbar)"],
-          ["free", "Livre", "Tudo liberado; fora da escala marcado com ⚠"],
+          { value: "strict", text: "Estrito", title: "Só acordes diatônicos e modificadores verdes" },
+          { value: "colorful", text: "Colorido", title: "Acordes diatônicos + tensões idiomáticas (âmbar)" },
+          { value: "free", text: "Livre", title: "Tudo liberado; fora da escala marcado com ⚠" },
         ]}
       />
       <div className="spacer" />
+      <Segmented<Theme>
+        label="Tema"
+        value={theme}
+        onChange={setTheme}
+        options={[
+          { value: "auto", text: "Auto", title: "Seguir o tema do sistema" },
+          { value: "light", text: "☀ Claro" },
+          { value: "dark", text: "☾ Escuro" },
+        ]}
+      />
       <InstrumentPicker />
     </header>
   );

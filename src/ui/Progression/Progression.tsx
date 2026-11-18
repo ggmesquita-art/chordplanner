@@ -133,6 +133,9 @@ export function Progression() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [modal, setModal] = useState<TextModalData | null>(null);
   const [live, setLive] = useState<{ id: string; beats: number } | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<string | null>(null);
   const grid = useStore((s) => s.grid);
   const region = useStore(useShallow((s) => selectRegion(s)));
 
@@ -143,6 +146,15 @@ export function Progression() {
     return new Map((chords ?? []).map((c) => [c.id, fitToRange(voiceChord(c), def.range).dropped]));
   }, [chords, instrumentId]);
 
+  // Refoca o card (pelo id) depois que mover/remover re-renderizou a lista.
+  useEffect(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    pendingFocus.current = null;
+    const el = Array.from(timelineRef.current?.children ?? []).find((n) => (n as HTMLElement).dataset.chordId === id);
+    (el as HTMLElement | undefined)?.focus();
+  });
+
   if (!block) return null;
   const unit = gridBeats(grid, blockMeter(song, block));
   const instrumentName = getInstrumentDef(instrumentId).name;
@@ -150,6 +162,15 @@ export function Progression() {
   const total = blockBeats(block);
   const missing = missingBeats(total, meter);
   const isPlayingBlock = playhead && song.arrangement[playhead.itemIndex]?.blockId === block.id;
+
+  const activate = (c: (typeof block.chords)[number], shift: boolean) => {
+    if (shift && useStore.getState().selectedChord) {
+      actions.setRegionEnd(c.id);
+      return;
+    }
+    actions.selectChord(c.id);
+    previewChord(c);
+  };
 
   const starts = block.chords.map((_, i) => block.chords.slice(0, i).reduce((n, c) => n + c.duration, 0));
 
@@ -293,7 +314,7 @@ export function Progression() {
         </button>
       </div>
 
-      <div className="timeline" role="list">
+      <div className="timeline" role="list" ref={timelineRef}>
         {block.chords.map((c, i) => {
           const start = starts[i];
           const inScale = !ctx || chordFits(c.root, c.quality, ctx.pcSet);
@@ -308,10 +329,13 @@ export function Progression() {
             <div
               key={c.id}
               role="listitem"
+              data-chord-id={c.id}
+              aria-current={c.id === selectedChord ? "true" : undefined}
+              aria-keyshortcuts="Enter Space Shift+Enter ArrowLeft ArrowRight Alt+ArrowLeft Alt+ArrowRight Delete"
               ref={playing ? keepVisible : undefined}
               className={`chord-card ${c.id === selectedChord ? "selected" : ""} ${playing ? "playing" : ""} ${!inScale ? (chromatic ? "chromatic" : "out") : ""} ${dragFrom === i ? "dragging" : ""} ${inRegion ? "in-region" : ""} ${crosses ? "crosses-bar" : ""}`}
               style={{ flexGrow: shown, minWidth: `${Math.max(88, shown * 26)}px` }}
-              title="Shift+clique estende a seleção (região)"
+              title="Shift+clique estende a seleção (região). Alt+←/→ move o acorde"
               draggable={!live}
               onDragStart={() => !live && setDragFrom(i)}
               onDragEnd={() => setDragFrom(null)}
@@ -321,17 +345,35 @@ export function Progression() {
                 if (dragFrom !== null) actions.moveChord(dragFrom, i);
                 setDragFrom(null);
               }}
-              onClick={(e) => {
-                if (e.shiftKey && useStore.getState().selectedChord) {
-                  actions.setRegionEnd(c.id);
-                  return;
-                }
-                actions.selectChord(c.id);
-                previewChord(c);
-              }}
+              onClick={(e) => activate(c, e.shiftKey)}
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === "Delete" || e.key === "Backspace") actions.removeChord(c.id);
+                if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey) return;
+                const k = e.key;
+                const n = block.chords.length;
+                const sibling = (d: number) => block.chords[i + d];
+                if (k === "Enter" || k === " ") {
+                  e.preventDefault();
+                  e.stopPropagation(); // Espaço não aciona o play global
+                  activate(c, e.shiftKey && k === "Enter");
+                } else if (k === "ArrowLeft" || k === "ArrowRight") {
+                  e.preventDefault();
+                  const d = k === "ArrowLeft" ? -1 : 1;
+                  if (e.altKey) {
+                    if (!sibling(d)) return;
+                    pendingFocus.current = c.id;
+                    actions.moveChord(i, i + d);
+                    setAnnounce(`${chordSymbol(c, spell)} movido para a posição ${i + d + 1} de ${n}`);
+                  } else {
+                    const next = e.currentTarget[d < 0 ? "previousElementSibling" : "nextElementSibling"] as HTMLElement | null;
+                    if (next?.classList.contains("chord-card")) next.focus();
+                  }
+                } else if (k === "Delete" || k === "Backspace") {
+                  e.preventDefault();
+                  const nb = sibling(1) ?? sibling(-1);
+                  pendingFocus.current = nb?.id ?? null;
+                  actions.removeChord(c.id);
+                }
               }}
               aria-label={`${chordSymbol(c, spell)}, ${roman}, ${shown} tempos`}
             >
@@ -392,6 +434,10 @@ export function Progression() {
             {tonic === null ? "Escolha a tônica (no topo ou clicando na roda) para começar." : "Clique nos acordes liberados da roda para montar a progressão."}
           </div>
         )}
+      </div>
+
+      <div className="sr-only" aria-live="polite">
+        {announce}
       </div>
 
       {missing > 0 && block.chords.length > 0 && (

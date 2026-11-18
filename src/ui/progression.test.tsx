@@ -93,4 +93,48 @@ describe("progressão", () => {
     expect(cards[1].classList.contains("crosses-bar")).toBe(true);
     expect(cards[1].querySelector(".tie")?.getAttribute("title")).toBe("Atravessa a barra de compasso");
   });
+
+  describe("teclado", () => {
+    it("Enter seleciona e Shift+Enter estende a região", () => {
+      setup(4);
+      const ids = chords().map((c) => c.id);
+      render(<Progression />);
+      const cards = screen.getAllByRole("listitem");
+      fireEvent.keyDown(cards[1], { key: "Enter" });
+      expect(useStore.getState().selectedChord).toBe(ids[1]);
+      fireEvent.keyDown(cards[3], { key: "Enter", shiftKey: true });
+      expect(useStore.getState().regionEnd).toBe(ids[3]);
+    });
+
+    it("Alt+→ move o acorde e mantém o foco nele", () => {
+      setup(3);
+      const ids = chords().map((c) => c.id);
+      render(<Progression />);
+      const card = screen.getAllByRole("listitem")[0];
+      card.focus();
+      fireEvent.keyDown(card, { key: "ArrowRight", altKey: true });
+      expect(chords().map((c) => c.id)).toEqual([ids[1], ids[0], ids[2]]);
+      expect((document.activeElement as HTMLElement).dataset.chordId).toBe(ids[0]);
+      expect(screen.getByText(/movido para a posição 2 de 3/)).toBeTruthy();
+    });
+
+    it("→ move só o foco", () => {
+      setup(3);
+      const ids = chords().map((c) => c.id);
+      render(<Progression />);
+      const cards = screen.getAllByRole("listitem");
+      cards[0].focus();
+      fireEvent.keyDown(cards[0], { key: "ArrowRight" });
+      expect(document.activeElement).toBe(cards[1]);
+      expect(chords().map((c) => c.id)).toEqual(ids);
+    });
+
+    it("Enter num botão interno não seleciona o card", () => {
+      setup(2);
+      act(() => useStore.getState().selectChord(chords()[0].id));
+      render(<Progression />);
+      fireEvent.keyDown(screen.getAllByLabelText("Aumentar duração")[1], { key: "Enter" });
+      expect(useStore.getState().selectedChord).toBe(chords()[0].id);
+    });
+  });
 });

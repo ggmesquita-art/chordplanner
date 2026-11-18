@@ -64,16 +64,25 @@ export async function initMidi(): Promise<boolean> {
 }
 
 export function configureMidi(next: MidiSettings) {
-  const wasActive = midiActive();
+  const was = output();
   settings = next;
   if (next.enabled && !access && status === "idle") void initMidi();
-  if (wasActive && !midiActive()) panic();
+  // Ligado → desligado: panic final na porta que estava em uso (as notas ativas ficariam presas).
+  if (was && !midiActive()) {
+    sendPanic(was);
+    active.clear();
+  }
+}
+
+/** Porta selecionada (ou a primeira), independente de a saída estar habilitada. */
+function selectedPort(): MIDIOutput | null {
+  if (!access) return null;
+  const outs = [...access.outputs.values()];
+  return (settings.outputId ? outs.find((o) => o.id === settings.outputId) : outs[0]) ?? null;
 }
 
 function output(): MIDIOutput | null {
-  if (!access || !settings.enabled) return null;
-  const outs = [...access.outputs.values()];
-  return (settings.outputId ? outs.find((o) => o.id === settings.outputId) : outs[0]) ?? null;
+  return settings.enabled ? selectedPort() : null;
 }
 
 export const midiActive = () => output() !== null;
@@ -112,18 +121,29 @@ export function noteOff(channel: number, note: number, at?: number) {
   else active.set(k, n);
 }
 
-/** Solta tudo: note-off das notas ativas + All Notes Off / pedal em todos os canais. */
-export function panic() {
-  const outs = access ? [...access.outputs.values()] : [];
-  for (const out of outs) {
-    for (const k of active.keys()) {
-      const [ch, note] = k.split(":").map(Number);
-      out.send([0x80 | ch, note, 0]);
-    }
-    for (let ch = 0; ch < 16; ch++) {
-      out.send([0xb0 | ch, 64, 0]);
-      out.send([0xb0 | ch, 123, 0]);
-    }
+/** Note-off das notas ativas + All Notes Off / pedal em todos os canais de uma porta. */
+function sendPanic(out: MIDIOutput) {
+  for (const k of active.keys()) {
+    const [ch, note] = k.split(":").map(Number);
+    out.send([0x80 | ch, note, 0]);
   }
+  for (let ch = 0; ch < 16; ch++) {
+    out.send([0xb0 | ch, 64, 0]);
+    out.send([0xb0 | ch, 123, 0]);
+  }
+}
+
+/** Solta as notas na porta SELECIONADA, só se a saída MIDI está habilitada ou há notas ativas pendentes. */
+export function panic() {
+  if (!settings.enabled && active.size === 0) return;
+  const out = selectedPort();
+  if (out) sendPanic(out);
+  active.clear();
+}
+
+/** Panic completo (todas as portas com acesso, 16 canais), para botão de segurança/teste. */
+export function panicAll() {
+  const outs = access ? [...access.outputs.values()] : [];
+  for (const out of outs) sendPanic(out);
   active.clear();
 }

@@ -8,6 +8,7 @@ import { ModifierPanel } from "./ui/ModifierPanel/ModifierPanel";
 import { SharedLink } from "./ui/SharedLink";
 import { Progression } from "./ui/Progression/Progression";
 import { Transport } from "./ui/Transport/Transport";
+import { useTheme } from "./ui/useTheme";
 
 function useShortcuts() {
   useEffect(() => {
@@ -34,6 +35,7 @@ export default function App() {
   useShortcuts();
   useMidiSync();
   useSessionGuard();
+  useTheme();
   const soundOnClick = useStore((s) => s.soundOnClick);
   const setSoundOnClick = useStore((s) => s.setSoundOnClick);
   const soundOnHover = useStore((s) => s.soundOnHover);

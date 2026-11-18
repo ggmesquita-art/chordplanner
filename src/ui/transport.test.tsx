@@ -62,4 +62,31 @@ describe("escopo Região", () => {
     expect(expanded.events.map((e) => e.chordIndex)).toEqual([1, 2]);
     act(() => useStore.getState().setPlaying(false));
   });
+
+  const arrowFromBlock = () => {
+    const block = screen.getByRole("radio", { name: "Bloco" });
+    fireEvent.click(block);
+    block.focus();
+    fireEvent.keyDown(block, { key: "ArrowRight" });
+  };
+
+  it("→ a partir de Bloco seleciona Região quando há região", () => {
+    withChords();
+    const chords = selectBlock(useStore.getState())!.chords;
+    render(<Transport />);
+    act(() => {
+      useStore.getState().selectChord(chords[1].id);
+      useStore.getState().setRegionEnd(chords[2].id);
+    });
+    arrowFromBlock();
+    expect(useStore.getState().playScope).toBe("region");
+    expect(document.activeElement).toBe(regionButton());
+  });
+
+  it("→ a partir de Bloco pula Região desabilitada e vai para Arranjo", () => {
+    render(<Transport />);
+    arrowFromBlock();
+    expect(useStore.getState().playScope).toBe("song");
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Arranjo" }));
+  });
 });

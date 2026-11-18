@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BLOCK_COLORS, blockBeats, blockMeter, type Block } from "../../core/song";
 import { TEMPLATES, type TemplateId } from "../../core/templates";
 import { useStore } from "../../state/store";
@@ -13,6 +13,18 @@ export function Arrangement() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   const [confirmTemplate, setConfirmTemplate] = useState<TemplateId | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const laneRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<string | null>(null);
+
+  // Refoca o card (pelo id da instância) depois que mover re-renderizou a lista.
+  useEffect(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    pendingFocus.current = null;
+    const el = Array.from(laneRef.current?.children ?? []).find((n) => (n as HTMLElement).dataset.itemId === id);
+    (el as HTMLElement | undefined)?.focus();
+  });
 
   // A confirmação só vale enquanto o mesmo bloco estiver selecionado.
   const pendingRemove = confirmRemove === selected ? confirmRemove : null;
@@ -62,12 +74,40 @@ export function Arrangement() {
           </span>
         )}
       </div>
-      <div className="lane" role="list">
+      <div className="lane" role="list" ref={laneRef}>
         {items.map(({ item, i, block, bars, start }) =>
           block ? (
             <div
               key={item.id}
               role="listitem"
+              data-item-id={item.id}
+              tabIndex={0}
+              aria-current={i === selected ? "true" : undefined}
+              aria-label={`Bloco ${block.name}, ×${item.repeat}, compassos ${Math.floor(start)}–${Math.max(Math.floor(start), Math.ceil(start + bars - 1))}`}
+              aria-keyshortcuts="Enter Space ArrowLeft ArrowRight Alt+ArrowLeft Alt+ArrowRight"
+              title="Alt+←/→ move o bloco"
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey) return;
+                const k = e.key;
+                if (k === "Enter" || k === " ") {
+                  e.preventDefault();
+                  e.stopPropagation(); // Espaço não aciona o play global
+                  selectItem(i);
+                  setConfirmRemove(null);
+                } else if (k === "ArrowLeft" || k === "ArrowRight") {
+                  e.preventDefault();
+                  const d = k === "ArrowLeft" ? -1 : 1;
+                  if (e.altKey) {
+                    if (i + d < 0 || i + d >= items.length) return;
+                    pendingFocus.current = item.id;
+                    moveItem(i, i + d);
+                    setAnnounce(`${block.name} movido para a posição ${i + d + 1} de ${items.length}`);
+                  } else {
+                    const next = e.currentTarget[d < 0 ? "previousElementSibling" : "nextElementSibling"] as HTMLElement | null;
+                    if (next?.classList.contains("block-card")) next.focus();
+                  }
+                }
+              }}
               className={`block-card ${i === selected ? "selected" : ""} ${playhead?.itemIndex === i ? "playing" : ""} ${dragFrom === i ? "dragging" : ""}`}
               style={{ "--block": block.color, flexGrow: Math.max(1, bars), minWidth: `${Math.max(110, Math.min(260, bars * 34))}px` } as React.CSSProperties}
               draggable
@@ -178,6 +218,9 @@ export function Arrangement() {
         <button className="add-block" onClick={addBlock} aria-label="Novo bloco">
           +
         </button>
+      </div>
+      <div className="sr-only" aria-live="polite">
+        {announce}
       </div>
     </section>
   );

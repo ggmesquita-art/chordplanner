@@ -6,6 +6,7 @@ import { selectRegion, useStore } from "../../state/store";
 import { togglePlay } from "../hooks";
 import { NumberField } from "../NumberField";
 import { PATTERNS } from "../patterns";
+import { Segmented } from "../Segmented";
 import { MidiPanel } from "./MidiPanel";
 
 export function Transport() {
@@ -45,24 +46,22 @@ export function Transport() {
       <button className={`toggle ${loop ? "on" : ""}`} onClick={() => setLoop(!loop)} title="Loop" aria-pressed={loop}>
         ⟲ Loop
       </button>
-      <div className="segmented small" role="radiogroup" aria-label="O que tocar">
-        <button className={scope === "song" ? "on" : ""} onClick={() => setPlayScope("song")} aria-checked={scope === "song"} role="radio">
-          Arranjo
-        </button>
-        <button className={scope === "block" ? "on" : ""} onClick={() => setPlayScope("block")} aria-checked={scope === "block"} role="radio">
-          Bloco
-        </button>
-        <button
-          className={scope === "region" ? "on" : ""}
-          onClick={() => setPlayScope("region")}
-          aria-checked={scope === "region"}
-          role="radio"
-          disabled={!hasRegion}
-          title={hasRegion ? "Tocar só os acordes da região selecionada" : "Selecione um acorde e Shift+clique em outro para marcar a região"}
-        >
-          Região
-        </button>
-      </div>
+      <Segmented
+        small
+        label="O que tocar"
+        value={scope}
+        onChange={setPlayScope}
+        options={[
+          { value: "song", text: "Arranjo" },
+          { value: "block", text: "Bloco" },
+          {
+            value: "region",
+            text: "Região",
+            disabled: !hasRegion,
+            title: hasRegion ? "Tocar só os acordes da região selecionada" : "Selecione um acorde e Shift+clique em outro para marcar a região",
+          },
+        ]}
+      />
       <label className="field">
         ♩=
         <NumberField value={song.bpm} min={30} max={300} onCommit={(v) => v !== undefined && setBpm(v)} aria-label="BPM" />

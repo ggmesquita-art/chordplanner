@@ -64,4 +64,15 @@ describe("FileMenu", () => {
     expect(screen.getByRole("alert").textContent?.length).toBeGreaterThan(0);
     expect(useStore.getState().songName).toBe("Original");
   });
+
+  it("menu Abrir usa lista simples, sem botão dentro de role=option", async () => {
+    useStore.getState().renameSong("Minha");
+    expect(useStore.getState().saveSong()).toBe(true);
+    render(<FileMenu />);
+    await act(async () => fireEvent.click(screen.getByText("Abrir ▾")));
+    expect(document.querySelectorAll('[role="option"] button').length).toBe(0);
+    expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
+    const open = screen.getByText("Minha").closest("button")!;
+    expect(open.getAttribute("aria-current")).toBe("true");
+  });
 });

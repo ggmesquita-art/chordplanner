@@ -7,6 +7,7 @@ import { voiceChord } from "../../core/voicing";
 import { makeChord } from "../../core/chords";
 import { selectChord, selectCtx, useStore } from "../../state/store";
 import { useInstrumentProgress, useInstrumentStatus } from "../hooks";
+import { useListbox } from "../useListbox";
 import { usePopover } from "../usePopover";
 
 const normalize = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -31,19 +32,23 @@ function StatusDot({ id }: { id: string }) {
   return null;
 }
 
-function Row({ def, active, onPick }: { def: InstrumentDef; active: boolean; onPick: (id: string) => void }) {
+function previewInstrument(id: string) {
+  const s = useStore.getState();
+  const chord = selectChord(s) ?? (() => {
+    const ctx = selectCtx(s);
+    const q = ctx?.degrees[0]?.primary ?? "maj";
+    return makeChord(s.tonic ?? 0, q);
+  })();
+  void previewNotes(voiceChord(chord), id);
+}
+
+function Row({ def, id, selected, cursor, onPick }: { def: InstrumentDef; id: string; selected: boolean; cursor: boolean; onPick: (id: string) => void }) {
   const preview = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const s = useStore.getState();
-    const chord = selectChord(s) ?? (() => {
-      const ctx = selectCtx(s);
-      const q = ctx?.degrees[0]?.primary ?? "maj";
-      return makeChord(s.tonic ?? 0, q);
-    })();
-    void previewNotes(voiceChord(chord), def.id);
+    previewInstrument(def.id);
   };
   return (
-    <div className={`inst-row ${active ? "active" : ""}`} role="option" aria-selected={active} onClick={() => onPick(def.id)}>
+    <div id={id} className={`inst-row ${cursor ? "active" : ""}`} role="option" aria-selected={selected} onClick={() => onPick(def.id)}>
       <button className="icon-btn" aria-label={`Ouvir ${def.name}`} onClick={preview}>▶</button>
       <span className="inst-name">
         {def.approximates && <span className="approx" title={`≈ ${def.name} — não existe no banco GM; usando ${def.approximates}`}>≈ </span>}
@@ -87,6 +92,24 @@ export function InstrumentPicker({ value, onChange, inheritLabel }: { value?: st
     return [...map];
   }, [query]);
 
+  // Opções navegáveis na ordem em que aparecem: herdar, sugeridos, categorias.
+  const flat = useMemo(() => {
+    const list: (string | undefined)[] = [];
+    if (perBlock) list.push(undefined);
+    if (!query) list.push(...suggestion.instruments);
+    for (const [, defs] of groups) list.push(...defs.map((d) => d.id));
+    return list;
+  }, [perBlock, query, suggestion, groups]);
+  const lb = useListbox({
+    count: flat.length,
+    open,
+    initial: flat.indexOf(current),
+    onChoose: (i) => pick(flat[i]),
+    onPlay: (i) => flat[i] && previewInstrument(flat[i]),
+  });
+  let n = perBlock ? 1 : 0;
+  const nextIndex = () => n++;
+
   const label = current ? getInstrumentDef(current).name : inheritLabel ?? "—";
 
   return (
@@ -99,10 +122,17 @@ export function InstrumentPicker({ value, onChange, inheritLabel }: { value?: st
       </button>
       {open && (
         <div className={`popover inst-popover ${perBlock ? "align-left" : "align-right"}`}>
-          <input className="search" placeholder="Buscar instrumento…" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-          <div className="inst-list" role="listbox">
+          <input
+            className="search"
+            placeholder="Buscar instrumento…"
+            value={query}
+            onChange={(e) => (setQuery(e.target.value), lb.resetActive())}
+            autoFocus
+            {...lb.inputProps}
+          />
+          <div className="inst-list" role="listbox" id={lb.listId} aria-label="Instrumentos">
             {perBlock && (
-              <div className={`inst-row ${!current ? "active" : ""}`} onClick={() => pick(undefined)}>
+              <div id={lb.optionId(0)} role="option" aria-selected={!current} className={`inst-row ${lb.active === 0 ? "active" : ""}`} onClick={() => pick(undefined)}>
                 <span className="inst-name">↳ Herdar do global ({getInstrumentDef(globalId).name})</span>
               </div>
             )}
@@ -110,9 +140,10 @@ export function InstrumentPicker({ value, onChange, inheritLabel }: { value?: st
               <div className="scale-group suggested">
                 <div className="group-title">Sugeridos para {scale.name}</div>
                 {suggestion.context && <div className="muted small pad-x">{suggestion.context}</div>}
-                {suggestion.instruments.map((id) => (
-                  <Row key={`s-${id}`} def={getInstrumentDef(id)} active={current === id} onPick={pick} />
-                ))}
+                {suggestion.instruments.map((id) => {
+                  const i = nextIndex();
+                  return <Row key={`s-${id}`} def={getInstrumentDef(id)} id={lb.optionId(i)} selected={current === id} cursor={lb.active === i} onPick={pick} />;
+                })}
                 {!perBlock && (
                   <label className="check pad-x">
                     <input type="checkbox" checked={followScale} onChange={(e) => setFollowScale(e.target.checked)} />
@@ -124,9 +155,10 @@ export function InstrumentPicker({ value, onChange, inheritLabel }: { value?: st
             {groups.map(([cat, defs]) => (
               <div key={cat} className="scale-group">
                 <div className="group-title">{CATEGORY_NAMES[cat]}</div>
-                {defs.map((d) => (
-                  <Row key={d.id} def={d} active={current === d.id} onPick={pick} />
-                ))}
+                {defs.map((d) => {
+                  const i = nextIndex();
+                  return <Row key={d.id} def={d} id={lb.optionId(i)} selected={current === d.id} cursor={lb.active === i} onPick={pick} />;
+                })}
               </div>
             ))}
           </div>

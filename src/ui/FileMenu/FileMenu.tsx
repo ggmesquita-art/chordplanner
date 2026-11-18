@@ -156,17 +156,17 @@ export function FileMenu() {
       </div>
 
       <div className="picker" ref={menuRef}>
-        <button className="btn" onClick={() => (setMenuOpen(!menuOpen), setImportError(null))} aria-haspopup="listbox" aria-expanded={menuOpen}>
+        <button className="btn" onClick={() => (setMenuOpen(!menuOpen), setImportError(null))} aria-haspopup="true" aria-expanded={menuOpen}>
           Abrir ▾
         </button>
         {menuOpen && (
           <div className="popover songs-pop">
             <div className="group-title">Músicas salvas</div>
-            <div className="songs-list" role="listbox">
+            <div className="songs-list" role="list">
               {!savedSongs.length && <div className="muted pad">Nenhuma música salva ainda. Use 💾 Salvar.</div>}
               {savedSongs.map((m) => (
-                <div key={m.id} className={`song-row ${m.id === songId ? "active" : ""}`} role="option" aria-selected={m.id === songId}>
-                  <button className="song-open" onClick={() => m.id !== songId && request({ kind: "open", id: m.id, name: m.name })}>
+                <div key={m.id} className={`song-row ${m.id === songId ? "active" : ""}`} role="listitem">
+                  <button className="song-open" aria-current={m.id === songId ? "true" : undefined} onClick={() => m.id !== songId && request({ kind: "open", id: m.id, name: m.name })}>
                     <span className="song-title">{m.name}</span>
                     <span className="muted small">
                       {keyLabel(m.scaleId, m.tonic)} · {dateFmt.format(m.updatedAt)}

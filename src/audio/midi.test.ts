@@ -1,5 +1,5 @@
 import { Midi } from "@tonejs/midi";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeChord } from "../core/chords";
 import { expandArrangement, makeBlock, makeSong } from "../core/song";
 import { songToMidi } from "../export/midi";
@@ -195,5 +195,56 @@ describe("saída MIDI (porta simulada)", () => {
 
     configureMidi({ ...DEFAULT_MIDI, enabled: false });
     expect(midiActive()).toBe(false);
+  });
+});
+
+describe("panic (porta selecionada, só com MIDI em uso)", () => {
+  // Módulo novo por teste: `access` e as notas ativas são estado de módulo.
+  const setup = async () => {
+    vi.resetModules();
+    const sent: Record<string, number[][]> = { a: [], b: [] };
+    const port = (id: string) => ({ id, name: id, send: (d: number[]) => void sent[id].push(d) });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { requestMIDIAccess: async () => ({ outputs: new Map([["a", port("a")], ["b", port("b")]]), onstatechange: null }) },
+    });
+    const m = await import("./midi");
+    await m.initMidi();
+    return { m, sent };
+  };
+
+  it("desabilitado e sem notas ativas: não envia nada", async () => {
+    const { m, sent } = await setup();
+    m.panic();
+    expect(sent).toEqual({ a: [], b: [] });
+  });
+
+  it("habilitado: envia só para a porta selecionada", async () => {
+    const { m, sent } = await setup();
+    m.configureMidi({ ...m.DEFAULT_MIDI, enabled: true, outputId: "b" });
+    m.noteOn(1, 60, 1);
+    sent.b.length = 0;
+    m.panic();
+    expect(sent.a).toEqual([]);
+    expect(sent.b[0]).toEqual([0x80, 60, 0]);
+    expect(sent.b).toContainEqual([0xb0, 123, 0]);
+  });
+
+  it("desabilitar depois de tocar envia o panic final na porta que estava em uso", async () => {
+    const { m, sent } = await setup();
+    m.configureMidi({ ...m.DEFAULT_MIDI, enabled: true, outputId: "b" });
+    m.noteOn(1, 64, 1);
+    sent.b.length = 0;
+    m.configureMidi({ ...m.DEFAULT_MIDI, enabled: false, outputId: "b" });
+    expect(sent.a).toEqual([]);
+    expect(sent.b[0]).toEqual([0x80, 64, 0]);
+    expect(sent.b).toContainEqual([0xbf, 123, 0]);
+  });
+
+  it("panicAll alcança todas as portas e canais", async () => {
+    const { m, sent } = await setup();
+    m.panicAll();
+    expect(sent.a).toContainEqual([0xbf, 64, 0]);
+    expect(sent.b).toContainEqual([0xb0, 123, 0]);
   });
 });

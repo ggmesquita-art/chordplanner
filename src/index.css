@@ -24,8 +24,29 @@
   background: var(--bg);
 }
 
+/* Claro: forçado por data-theme="light" ou, em "auto", pela preferência do sistema. */
+:root[data-theme="light"] {
+    --bg: #f4f5f9;
+    --panel: #ffffff;
+    --panel-2: #eef0f6;
+    --line: #d9dce6;
+    --text: #1b1e27;
+    --muted: #5f667a;
+    --accent: #3b5bdb;
+    --accent-2: #7048e8;
+    --ok: #13875a;
+    --tension: #b7791f;
+    --bad: #c92a2a;
+    --ring-0: #3b5bdb;
+    --ring-1: #6741d9;
+    --ring-2: #a61e6d;
+    --slice-off: #e6e8ef;
+    --slice-off-text: #9aa0b2;
+    color-scheme: light;
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --bg: #f4f5f9;
     --panel: #ffffff;
     --panel-2: #eef0f6;
@@ -1371,4 +1392,37 @@ section {
     min-width: 0;
     max-width: 100%;
   }
+}
+
+/* ——— Teclado: progressão e arranjo ——— */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.chord-card:focus-visible,
+.block-card:focus-visible,
+.chord-resize:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ——— Seletores, segmentados e tema ——— */
+.scale-item[aria-selected="true"],
+.inst-row[aria-selected="true"] {
+  font-weight: 600;
+}
+.scale-item.active,
+.inst-row.active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.segmented button:focus-visible {
+  outline-offset: -2px;
 }

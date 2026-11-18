@@ -4,6 +4,7 @@ import { makeSpeller, mod12 } from "../../core/pitch";
 import { FAMILY_NAMES, getScale, pitchSet, relativeModes, scaleFormula, searchScales, type ScaleDef, type ScaleFamily } from "../../core/scales";
 import { useStore } from "../../state/store";
 import { currentInstrument } from "../hooks";
+import { useListbox } from "../useListbox";
 import { usePopover } from "../usePopover";
 
 export function ScalePicker() {
@@ -36,11 +37,8 @@ export function ScalePicker() {
     return [...map];
   }, [query]);
 
-  const shown = hover ?? scale;
+  const flat = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   const previewTonic = tonic ?? 0;
-  const spell = makeSpeller(previewTonic, pitchSet(previewTonic, shown), accidentals);
-  const notes = pitchSet(previewTonic, shown).map(spell).join(" ");
-
   const playScale = (sc: ScaleDef) => {
     const base = 60 + previewTonic;
     void previewNotes([...sc.intervals.map((i) => base + i), base + 12], currentInstrument(), { arpeggio: true });
@@ -50,6 +48,18 @@ export function ScalePicker() {
     setScale(sc.id);
     setOpen(false);
   };
+
+  const lb = useListbox({
+    count: flat.length,
+    open,
+    initial: flat.findIndex((sc) => sc.id === scaleId),
+    onChoose: (i) => choose(flat[i]),
+    onPlay: (i) => playScale(flat[i]),
+    onNavigate: () => setHover(null),
+  });
+  const shown = hover ?? flat[Math.min(lb.active, flat.length - 1)] ?? scale;
+  const spell = makeSpeller(previewTonic, pitchSet(previewTonic, shown), accidentals);
+  const notes = pitchSet(previewTonic, shown).map(spell).join(" ");
 
   const relatives = relativeModes(scale).filter((m) => m.id !== scale.id);
   const toRelative = (target: ScaleDef) => {
@@ -74,30 +84,31 @@ export function ScalePicker() {
             className="search"
             placeholder="Buscar escala (nome ou alias)…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && groups[0]) choose(groups[0][1][0]);
-              if (e.key === "Escape") setOpen(false);
-            }}
+            onChange={(e) => (setQuery(e.target.value), lb.resetActive(), setHover(null))}
+            {...lb.inputProps}
           />
           <div className="scale-popover-body">
-            <div className="scale-list" role="listbox">
+            <div className="scale-list" role="listbox" id={lb.listId} aria-label="Escalas">
               {groups.map(([family, scales]) => (
                 <div key={family} className="scale-group">
                   <div className="group-title">{FAMILY_NAMES[family]}</div>
-                  {scales.map((sc) => (
+                  {scales.map((sc) => {
+                    const i = flat.indexOf(sc);
+                    return (
                     <div
                       key={sc.id}
+                      id={lb.optionId(i)}
                       role="option"
                       aria-selected={sc.id === scaleId}
-                      className={`scale-item ${sc.id === scaleId ? "active" : ""}`}
+                      className={`scale-item ${i === lb.active ? "active" : ""}`}
                       onMouseEnter={() => setHover(sc)}
                       onClick={() => choose(sc)}
                     >
                       <span>{sc.name}</span>
                       <span className="muted small">{sc.intervals.length}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ))}
               {!groups.length && <div className="muted pad">Nenhuma escala encontrada.</div>}

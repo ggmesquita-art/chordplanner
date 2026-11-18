@@ -67,3 +67,17 @@ describe("controles do bloco", () => {
     expect(count()).toBe(1);
   });
 });
+
+describe("teclado", () => {
+  it("Enter seleciona e Alt+← reordena mantendo o foco", () => {
+    const ids = useStore.getState().song.arrangement.map((a) => a.id);
+    render(<Arrangement />);
+    const cards = screen.getAllByRole("listitem");
+    cards[1].focus();
+    fireEvent.keyDown(cards[1], { key: "Enter" });
+    expect(useStore.getState().selectedItem).toBe(1);
+    fireEvent.keyDown(cards[1], { key: "ArrowLeft", altKey: true });
+    expect(useStore.getState().song.arrangement.map((a) => a.id)).toEqual([ids[1], ids[0]]);
+    expect((document.activeElement as HTMLElement).dataset.itemId).toBe(ids[1]);
+  });
+});
