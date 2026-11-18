@@ -4,7 +4,7 @@
 import { Midi } from "@tonejs/midi";
 import { instrumentByPatchID } from "@tonejs/midi/dist/InstrumentMaps";
 import { gmProgram, renderNotes } from "../audio/render";
-import { expandArrangement, type Song } from "../core/song";
+import { expandArrangement, type Song, type TempoPoint } from "../core/song";
 
 const PPQ = 480;
 const ACOUSTIC_BASS = 32;
@@ -14,6 +14,8 @@ export type MidiExportOptions = {
   channel: number;
   /** Separa o baixo do voicing numa trilha própria. */
   splitBass: boolean;
+  /** Tônica global (pitch class) para o bordão; sem ela, blocos com bordão não o exportam. */
+  tonic?: number | null;
 };
 
 export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
@@ -35,8 +37,24 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
     return i >= 0 ? eventTicks[i] : tick;
   };
 
-  midi.header.tempos = expanded.tempoMap.map((t) => ({ ticks: tickAtSec(t.startSec), bpm: t.bpm * (4 / t.meter[1]) }));
-  midi.header.timeSignatures = expanded.tempoMap.map((t) => ({ ticks: tickAtSec(t.startSec), timeSignature: [...t.meter] }));
+  // Tick de um tempo absoluto, inclusive no meio de um acorde (pontos de rampa de andamento).
+  const tickAtBeat = (beat: number) => {
+    const i = expanded.events.findIndex((e) => beat >= e.startBeat - 1e-6 && beat < e.startBeat + e.beats - 1e-6);
+    if (i >= 0) {
+      const e = expanded.events[i];
+      return eventTicks[i] + Math.round((beat - e.startBeat) * PPQ * (4 / e.meter[1]));
+    }
+    const next = expanded.events.findIndex((e) => e.startBeat >= beat - 1e-6);
+    return next >= 0 ? eventTicks[next] : tick;
+  };
+  const tickOf = (t: TempoPoint) => (t.startBeat !== undefined ? tickAtBeat(t.startBeat) : tickAtSec(t.startSec));
+
+  // Rampas (`rampTo`) entram como um ponto de tempo por tempo, com o BPM médio dele.
+  midi.header.tempos = expanded.tempoMap.map((t) => ({ ticks: tickOf(t), bpm: t.bpm * (4 / t.meter[1]) }));
+  // Compasso só quando muda (pontos de rampa não repetem a fórmula).
+  midi.header.timeSignatures = expanded.tempoMap
+    .filter((t, i, all) => i === 0 || t.meter.join("/") !== all[i - 1].meter.join("/"))
+    .map((t) => ({ ticks: tickOf(t), timeSignature: [...t.meter] }));
   midi.header.meta = expanded.markers.map((m) => ({ type: "marker", text: m.name, ticks: tickAtSec(m.startSec) }));
   midi.header.update();
 
@@ -45,24 +63,31 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
     fitToInstrument: false,
     humanize: false,
     channelFor: (blockId) => song.blocks[blockId]?.midiChannel ?? opts.channel,
+    // A música manda: condução de vozes e re-ataque seguem o que está salvo nela.
+    voiceLeading: song.voiceLeading,
+    reattack: song.reattack,
+    tonicFor: () => opts.tonic ?? null,
   });
 
   const tracks = new Map<string, ReturnType<Midi["addTrack"]>>();
-  const trackFor = (bass: boolean, channel: number) => {
-    const key = `${bass ? "b" : "c"}${channel}`;
+  const trackFor = (bass: boolean, channel: number, bassInstrument?: string) => {
+    const program = bass && bassInstrument ? gmProgram(bassInstrument, instrumentByPatchID) : undefined;
+    const key = `${bass ? "b" : "c"}${channel}${program !== undefined ? `:${program}` : ""}`;
     let t = tracks.get(key);
     if (!t) {
       t = midi.addTrack();
       t.name = `${bass ? "Baixo" : "Acordes"}${channel !== opts.channel ? ` (ch ${channel})` : ""}`;
       t.channel = channel - 1;
-      t.instrument.number = bass ? ACOUSTIC_BASS : gmProgram(song.instrument, instrumentByPatchID);
+      t.instrument.number = bass ? (program ?? ACOUSTIC_BASS) : gmProgram(song.instrument, instrumentByPatchID);
       tracks.set(key, t);
     }
     return t;
   };
 
   for (const n of notes) {
-    trackFor(opts.splitBass && n.isBass, n.channel).addNote({ midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity });
+    // Camada de baixo (`bassInstrument`): a trilha usa o program do instrumento do bloco.
+    const layer = n.isBass ? expanded.events[n.eventIndex].bassInstrument : undefined;
+    trackFor(opts.splitBass && n.isBass, n.channel, layer).addNote({ midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity });
   }
   return midi.toArray();
 }

@@ -68,3 +68,20 @@ export function barLinesWithin(startBeat: number, duration: number, [beatsPerBar
   for (let b = (Math.floor(startBeat / beatsPerBar + EPS) + 1) * beatsPerBar; b < startBeat + duration - EPS; b += beatsPerBar) lines.push(b - startBeat);
   return lines;
 }
+
+/**
+ * Segundos entre duas posições (em tempos) de uma rampa linear de andamento: o BPM vai de `fromBpm`
+ * a `toBpm` ao longo de `beats` tempos. Fórmula fechada: ∫ 60/bpm(b) db = 60·beats/(to−from) · ln(bpm(end)/bpm(start)).
+ * Com andamento constante cai em 60·(end−start)/bpm.
+ */
+export function rampSeconds(beats: number, fromBpm: number, toBpm: number, startBeat: number, endBeat: number): number {
+  const span = endBeat - startBeat;
+  if (span <= 0) return 0;
+  if (beats <= 0 || Math.abs(toBpm - fromBpm) < 1e-9) return (60 * span) / fromBpm;
+  const at = (b: number) => fromBpm + ((toBpm - fromBpm) * b) / beats;
+  return ((60 * beats) / (toBpm - fromBpm)) * Math.log(at(endBeat) / at(startBeat));
+}
+
+/** BPM instantâneo numa rampa linear, na posição `beat`. */
+export const rampBpmAt = (beats: number, fromBpm: number, toBpm: number, beat: number): number =>
+  beats <= 0 ? fromBpm : fromBpm + ((toBpm - fromBpm) * beat) / beats;

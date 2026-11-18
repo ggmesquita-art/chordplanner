@@ -16,11 +16,20 @@ export function spokenNote(name: string): string {
   return letter + acc;
 }
 
-export function spokenChord(symbol: string, roman: string | null, state: string, chromaticKind?: "secondary" | "borrowed"): string {
+export type SpokenChromatic = "secondary" | "borrowed" | "supertonic" | "subV";
+
+const CHROMATIC_TEXT: Record<SpokenChromatic, string> = {
+  secondary: "dominante secundária",
+  borrowed: "empréstimo modal",
+  supertonic: "segundo grau secundário",
+  subV: "substituto de trítono",
+};
+
+export function spokenChord(symbol: string, roman: string | null, state: string, chromaticKind?: SpokenChromatic): string {
   const m = symbol.match(/^([A-G][♯♭𝄪𝄫]?)(.*)$/u);
   const root = m ? spokenNote(m[1]) : symbol;
   const rest = m?.[2] ?? "";
   const quality = rest === "" ? "maior" : rest === "m" ? "menor" : rest === "°" ? "diminuto" : rest === "+" ? "aumentado" : rest;
-  const stateText = chromaticKind === "secondary" ? "dominante secundária" : chromaticKind === "borrowed" ? "empréstimo modal" : STATE[state];
+  const stateText = chromaticKind ? CHROMATIC_TEXT[chromaticKind] : STATE[state];
   return [`${root} ${quality}`, roman ? `grau ${roman}` : null, stateText].filter(Boolean).join(", ");
 }

@@ -8,7 +8,7 @@
 - **MVP: completo.** Catálogo de 73 escalas, roda de 3 anéis, progressão, modificadores, playback, 55 instrumentos.
 - **v1: quase completa.** Blocos e arranjo, fórmulas de compasso, swing, templates, modos Estrito/Colorido/Livre, instrumentos sugeridos por escala, salvar/abrir, export de cifra, MIDI e JSON, link de compartilhamento e contagem estão prontos. Falta o que está na Etapa 1.
 - **v2: só o que foi antecipado.** Dominantes secundárias, empréstimo modal, saída MIDI ao vivo e export `.mid` existem; o resto da v2 não começou.
-- **Saúde:** typecheck, lint e build limpos; 240 testes passando; sem vulnerabilidades em `npm audit`.
+- **Saúde:** typecheck, lint e build limpos; 293 testes passando; sem vulnerabilidades em `npm audit`.
 
 ### Entregue na última rodada
 
@@ -98,17 +98,18 @@ Testes (§10)
 
 Ordem sugerida: os dois primeiros itens destravam os demais.
 
-- [ ] **Voicings** — Aberto, Drop 2, Drop 3, Quartal, Shell (§3.5). O campo `voicing` existe no modelo, mas `src/core/voicing.ts` o ignora e o seletor está desabilitado.
-- [ ] **Análise funcional** — criar `core/analysis.ts` com função harmônica T/SD/D nos cards (§3.7).
-- [ ] Sugestão de próximo acorde na roda (§3.7).
-- [ ] Condução de vozes automática, opcional (§5.1).
-- [ ] Acordes com sétima no dicionário diatônico, para escalas como a Bebop dominante (§2.5).
-- [ ] Outros empréstimos modais, ii–V secundários e substituto de trítono (§3.7).
+- [x] **Voicings** — Fechado, Aberto, Drop 2, Drop 3, Quartal, Shell (§3.5), no painel de modificadores.
+- [x] **Análise funcional** — `core/analysis.ts`; função harmônica T/SD/D nos cards (§3.7).
+- [x] Sugestão de próximo acorde na roda, com o motivo (ii–V–I, dominante → tônica…) (§3.7).
+- [x] Condução de vozes automática, opcional (§5.1).
+- [x] Sétimas por grau (7, maj7, m7, m(maj7), m7♭5, °7) como chips na lista por graus (§2.5).
+- [x] Empréstimos de outros modos com a mesma tônica, ii/x secundários e substituto de trítono (♭II → I) (§3.7). Com isso o modo Colorido libera bem mais: 25 de 36 fatias em Ré maior (antes 18).
 - [ ] Modulação por bloco: tônica e escala próprias (§3.8).
-- [ ] Ritardando/accelerando e casa 1/casa 2 (§3.8).
-- [ ] Camadas acordes + baixo com instrumentos separados (§3.9).
-- [ ] Bordão contínuo na tônica: a flag `drone` já existe no sitar e na gaita de foles, mas nada a usa (§5.2).
-- [ ] Re-ataque por compasso para instrumentos de decay em acordes longos (§5.2).
+- [x] Ritardando/accelerando por bloco ("♩ final"), também no export MIDI (§3.8).
+- [ ] Casa 1/casa 2 (§3.8).
+- [x] Camada de baixo com instrumento próprio por bloco, também na trilha "Baixo" do MIDI (§3.9).
+- [x] Bordão contínuo na tônica por bloco, para instrumentos com `drone` (sitar, gaita de foles) (§5.2).
+- [x] Re-ataque por compasso para instrumentos de decay em acordes longos (toggle "Re-atacar") (§5.2).
 
 ## Etapa 5 — v3
 

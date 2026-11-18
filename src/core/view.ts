@@ -217,3 +217,14 @@ export function blockUsage(song: Song): Map<string, number> {
   for (const it of song.arrangement) usage.set(it.blockId, (usage.get(it.blockId) ?? 0) + 1);
   return usage;
 }
+
+// ---------- Análise ----------
+
+/** Texto do tooltip de um acorde cromático; `withLabel` inclui o rótulo (roda) ou o omite (card). */
+export function chromaticTitle(c: ChromaticFunction, withLabel: boolean): string {
+  const tag = withLabel ? `: ${c.label}` : "";
+  if (c.kind === "secondary") return `Dominante secundária${tag} (resolve em ${c.target})`;
+  if (c.kind === "supertonic") return `ii secundário${tag} (prepara ${c.target})`;
+  if (c.kind === "subV") return `Substituto de trítono da dominante${tag} (resolve meio tom abaixo, em ${c.target})`;
+  return `Empréstimo modal de ${c.from}${tag}`;
+}

@@ -65,7 +65,8 @@ describe("roda", () => {
     expect(sliceState(ctxC, 2, "maj")).toBe("chromatic"); // V/ii
     expect(sliceState(ctxC, 4, "maj")).toBe("chromatic"); // V/vi
     expect(sliceState(ctxC, 2, "aug")).not.toBe("diatonic");
-    expect(sliceState(ctxC, 1, "maj")).toBe("out");
+    expect(sliceState(ctxC, 1, "maj")).toBe("chromatic"); // subV
+    expect(sliceState(ctxC, 6, "maj")).toBe("out");
     const s = wheelSlices(ctxC, "free");
     const fsharp = s[0].find((x) => x.root === 6)!;
     expect(fsharp.state).toBe("out");
@@ -171,7 +172,9 @@ describe("progressão", () => {
     const sec = chordRole(ctxC, makeChord(2, "maj"));
     expect(sec.inScale).toBe(false);
     expect(sec.chromatic?.kind).toBe("secondary");
-    expect(chordRole(ctxC, makeChord(1, "maj")).chromatic).toBeNull();
+    // ♭II maior é o subV; Fá♯ maior continua sem função em Dó maior.
+    expect(chordRole(ctxC, makeChord(1, "maj")).chromatic?.kind).toBe("subV");
+    expect(chordRole(ctxC, makeChord(6, "maj")).chromatic).toBeNull();
   });
 
   it("régua: marcas por tempo e número do compasso", () => {

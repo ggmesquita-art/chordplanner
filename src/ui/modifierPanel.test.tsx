@@ -52,3 +52,13 @@ describe("conflito de modificadores", () => {
     expect(mods()).toEqual([{ kind: "ext", value: 7 }]);
   });
 });
+
+describe("voicing", () => {
+  it("escolher Drop 2 chama setVoicing e grava o voicing no acorde", () => {
+    render(<ModifierPanel />);
+    fireEvent.change(screen.getByLabelText("Voicing"), { target: { value: "drop2" } });
+    expect(selectChord(useStore.getState())!.voicing).toBe("drop2");
+    fireEvent.change(screen.getByLabelText("Voicing"), { target: { value: "closed" } });
+    expect(selectChord(useStore.getState())!.voicing).toBeUndefined();
+  });
+});

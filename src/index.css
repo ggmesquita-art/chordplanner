@@ -1430,3 +1430,31 @@ section {
 .segmented button:focus-visible {
   outline-offset: -2px;
 }
+
+/* ——— Análise: função harmônica e sugestões ——— */
+.fn-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  color: var(--muted);
+}
+.suggest-dot {
+  fill: #ffd166;
+  stroke: var(--bg, #000);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.wheel-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Sem itálico: o ♭ em itálico sintético sai deformado em algumas fontes de fallback. */
+.degree-alts .chip.seventh {
+  border-style: dashed;
+}

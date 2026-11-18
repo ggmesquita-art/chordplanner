@@ -2,8 +2,8 @@
 // arranjo expandido. Puro, sem Web Audio: usado pelo áudio do navegador, pela
 // saída MIDI e pelo export .mid — assim o arquivo soa como o que se ouve.
 
-import type { Expanded, PlaybackPattern } from "../core/song";
-import { isCompound, secondsPerBeat, swingOffset } from "../core/timeline";
+import type { Expanded, PlaybackPattern, TimedChord } from "../core/song";
+import { barLinesWithin, isCompound, secondsPerBeat, swingOffset } from "../core/timeline";
 import { fitToRange, voiceChord } from "../core/voicing";
 import { getInstrumentDef, type InstrumentDef } from "./instruments";
 
@@ -31,7 +31,26 @@ export type RenderOptions = {
   humanize: boolean;
   channelFor?: (blockId: string) => number;
   rng?: () => number;
+  /** Tônica (pitch class 0–11) do bloco, para o bordão; null/ausente = sem bordão. */
+  tonicFor?: (blockId: string) => number | null;
+  /** Re-ataca a cada compasso acordes longos de instrumentos de decay (padrão "block"). */
+  reattack?: boolean;
+  /** Condução de vozes: o voicing de cada acorde considera o anterior da mesma passada. */
+  voiceLeading?: boolean;
 };
+
+/** Opções de execução que o `play` repassa ao `renderNotes`. */
+export type PlaybackExtras = Pick<RenderOptions, "tonicFor" | "reattack" | "voiceLeading">;
+
+/**
+ * Segundos por tempo dentro do acorde. Numa rampa de andamento usa a média do acorde
+ * (aproximação: subdivisões e cliques ficam uniformes dentro do acorde); fora dela, o BPM do acorde.
+ */
+const localSpb = (ev: TimedChord) => (ev.endBpm !== undefined && ev.endBpm !== ev.bpm ? ev.durationSec / ev.beats : 60 / ev.bpm);
+
+const DRONE_BASE = 36; // C2
+const DRONE_VELOCITY = 0.4;
+const REATTACK_VELOCITY = 0.6;
 
 /** Dedilhado por família: cordas espalham as notas; pads e sopros atacam juntos. */
 export function strumFor(def: InstrumentDef): number {
@@ -65,22 +84,50 @@ export function strike(notes: number[], start: number, duration: number, velocit
 export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[] {
   const rng = opts.rng ?? Math.random;
   const out: NoteEvent[] = [];
+  let prevNotes: number[] | null = null;
+  let prevPass = "";
 
   expanded.events.forEach((ev, eventIndex) => {
     const def = getInstrumentDef(ev.instrument);
-    const voiced = voiceChord(ev.chord);
-    const notes = opts.fitToInstrument ? fitToRange(voiced, def.range).notes : voiced;
-    if (!notes.length) return;
-    const bass = voiced.length > 1 ? notes[0] : null;
-    const spb = 60 / ev.bpm;
+    // Condução de vozes: o "anterior" vale só dentro da mesma passada (item + repetição).
+    const pass = `${ev.itemIndex}:${ev.repetition}`;
+    if (pass !== prevPass) prevNotes = null;
+    prevPass = pass;
+    const voiced = voiceChord(ev.chord, opts.voiceLeading ? prevNotes : null);
+    if (opts.voiceLeading) prevNotes = voiced;
+
+    // Camada de baixo: a nota grave do voicing sai no instrumento próprio; o resto, no do acorde.
+    const layerDef = ev.bassInstrument && voiced.length > 1 ? getInstrumentDef(ev.bassInstrument) : null;
+    const layerNote = layerDef ? (opts.fitToInstrument ? fitToRange([voiced[0]], layerDef.range).notes[0] : voiced[0]) : undefined;
+    const upper = layerDef ? voiced.slice(1) : voiced;
+    const notes = opts.fitToInstrument ? fitToRange(upper, def.range).notes : upper;
+    if (!notes.length && layerNote === undefined) return;
+    const bass = !layerDef && voiced.length > 1 ? notes[0] : null;
+    const spb = localSpb(ev);
     const channel = opts.channelFor?.(ev.blockId) ?? 1;
     const pattern: PlaybackPattern = opts.fitToInstrument && def.polyphony === "mono" && ev.pattern === "block" ? "arp-up" : ev.pattern;
     const strum = opts.humanize ? strumFor(def) : 0;
     const push = (hits: Hit[]) => hits.forEach((h) => out.push({ ...h, channel, isBass: h.midi === bass, eventIndex, instrument: ev.instrument }));
     const at = (beat: number) => ev.startSec + beat * spb;
 
+    if (layerNote !== undefined && ev.bassInstrument) {
+      // Uma vez por acorde, no início, sustentado até o fim.
+      const [h] = strike([layerNote], ev.startSec, ev.durationSec * 0.97, pattern === "block" || pattern === "comping" ? 0.75 : 0.7, 0, opts.humanize, rng);
+      out.push({ ...h, channel, isBass: true, eventIndex, instrument: ev.bassInstrument });
+    }
+    if (!notes.length) return;
+
     if (pattern === "block") {
-      push(strike(notes, ev.startSec, ev.durationSec * 0.97, 0.75, strum, opts.humanize, rng));
+      // Re-ataque: acordes de decay com mais de um compasso voltam a soar a cada barra de compasso do bloco.
+      const cuts = opts.reattack && def.envelope === "decay" ? barLinesWithin(ev.blockBeat, ev.beats, ev.meter) : [];
+      if (!cuts.length) {
+        push(strike(notes, ev.startSec, ev.durationSec * 0.97, 0.75, strum, opts.humanize, rng));
+      } else {
+        const edges = [0, ...cuts, ev.beats];
+        for (let i = 0; i < edges.length - 1; i++) {
+          push(strike(notes, at(edges[i]), (edges[i + 1] - edges[i]) * spb * 0.97, i === 0 ? 0.75 : REATTACK_VELOCITY, strum, opts.humanize, rng));
+        }
+      }
     } else if (pattern === "arp-up" || pattern === "arp-down") {
       const seq = pattern === "arp-up" ? notes : [...notes].reverse();
       const steps = Math.max(1, Math.floor(ev.beats / 0.5));
@@ -101,7 +148,45 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
     }
   });
 
+  renderDrones(expanded, opts, out);
   return out;
+}
+
+/**
+ * Bordão: uma nota na tônica (2ª oitava) do início ao fim de cada passada de bloco com `drone`, em
+ * instrumentos que o suportam. Instrumentos de decay (sitar) re-atacam a cada compasso.
+ */
+function renderDrones(expanded: Expanded, opts: RenderOptions, out: NoteEvent[]) {
+  const { events } = expanded;
+  for (let i = 0; i < events.length; ) {
+    const first = events[i];
+    let j = i;
+    while (j + 1 < events.length && events[j + 1].itemIndex === first.itemIndex && events[j + 1].repetition === first.repetition) j++;
+    const group = events.slice(i, j + 1);
+    const eventIndex = i;
+    i = j + 1;
+
+    const def = getInstrumentDef(first.instrument);
+    if (!first.drone || !def.drone) continue;
+    const tonic = opts.tonicFor?.(first.blockId);
+    if (tonic === null || tonic === undefined) continue;
+    const midi = opts.fitToInstrument ? fitToRange([DRONE_BASE + tonic], def.range).notes[0] : DRONE_BASE + tonic;
+    if (midi === undefined) continue;
+
+    const lastEv = group[group.length - 1];
+    const endBeat = lastEv.blockBeat + lastEv.beats;
+    const secAt = (beat: number) => {
+      const ev = group.find((e) => beat <= e.blockBeat + e.beats + 1e-9) ?? lastEv;
+      return ev.startSec + (beat - ev.blockBeat) * localSpb(ev);
+    };
+    const cuts = def.envelope === "decay" ? barLinesWithin(first.blockBeat, endBeat - first.blockBeat, first.meter).map((o) => first.blockBeat + o) : [];
+    const edges = [first.blockBeat, ...cuts, endBeat];
+    const channel = opts.channelFor?.(first.blockId) ?? 1;
+    for (let k = 0; k < edges.length - 1; k++) {
+      const time = secAt(edges[k]);
+      out.push({ midi, time, duration: secAt(edges[k + 1]) - time, velocity: DRONE_VELOCITY, channel, isBass: false, eventIndex, instrument: first.instrument });
+    }
+  }
 }
 
 export type CountInClick = { time: number; accent: boolean };
@@ -114,7 +199,7 @@ export type CountInClick = { time: number; accent: boolean };
 export function metronomeClicks(expanded: Expanded): CountInClick[] {
   const clicks: CountInClick[] = [];
   for (const ev of expanded.events) {
-    const spb = secondsPerBeat(ev.bpm);
+    const spb = localSpb(ev);
     const step = isCompound(ev.meter) ? 3 : 1;
     const first = ev.blockBeat;
     // Cliques nos tempos inteiros da grade do bloco que caem dentro do acorde (acordes de ½ tempo

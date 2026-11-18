@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getQuality, makeChord, type QualityId } from "../../core/chords";
+import { nextChordSuggestions } from "../../core/analysis";
+import type { SeventhInfo } from "../../core/diatonic";
 import { chordSymbol } from "../../core/modifiers";
 import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
-import { WHEEL_RINGS, extraQualities, hoverChordInfo, sliceClickable, sliceState, wheelCounts, wheelSlices } from "../../core/view";
+import { WHEEL_RINGS, chromaticTitle, extraQualities, hoverChordInfo, sliceClickable, sliceState, wheelCounts, wheelSlices } from "../../core/view";
 import { useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
@@ -73,6 +75,7 @@ export function ChordWheel() {
   const block = useBlock();
   const { setTonic, addChord } = useStore.getState();
   const [hover, setHover] = useState<{ root: PitchClass; quality: QualityId } | null>(null);
+  const [suggest, setSuggest] = useState(true);
   const [menu, setMenu] = useState<{ root: PitchClass; x: number; y: number; qualities: QualityId[] } | null>(null);
   const refs = useRef(new Map<string, SVGGElement>());
   const badgeRefs = useRef(new Map<number, SVGGElement>());
@@ -152,6 +155,14 @@ export function ChordWheel() {
 
   const slices = useMemo(() => wheelSlices(ctx, mode), [ctx, mode]);
 
+  // Próximo acorde: histórico = acordes do bloco até o selecionado (ou o bloco todo).
+  const suggestions = useMemo(() => {
+    if (!suggest || !ctx || !block) return new Map<string, { weight: number; reason: string }>();
+    const at = block.chords.findIndex((c) => c.id === selectedChordId);
+    const history = at >= 0 ? block.chords.slice(0, at + 1) : block.chords;
+    return new Map(nextChordSuggestions(ctx, history).map((s) => [`${s.root}-${s.quality}`, s]));
+  }, [suggest, ctx, block, selectedChordId]);
+
   const activate = (root: PitchClass, quality: QualityId) => {
     // Menu radial: devolve o foco ao badge que o abriu (o menu some ao escolher).
     if (menu) badgeRefs.current.get(menu.root)?.focus();
@@ -193,6 +204,9 @@ export function ChordWheel() {
 
   return (
     <div className="wheel-wrap">
+      <label className="wheel-suggest small">
+        <input type="checkbox" checked={suggest} onChange={(e) => setSuggest(e.target.checked)} /> Sugestões
+      </label>
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="wheel" role="group" aria-label="Roda de acordes (círculo de quintas)">
         {RINGS.map((ring, ri) =>
           Array.from({ length: 12 }, (_, pos) => {
@@ -229,7 +243,7 @@ export function ChordWheel() {
                 </text>
                 {chromatic && (
                   <title>
-                    {chromatic.kind === "secondary" ? `Dominante secundária: ${chromatic.label} (resolve em ${chromatic.target})` : `Empréstimo modal de ${chromatic.from}: ${chromatic.label}`}
+                    {chromaticTitle(chromatic, true)}
                   </title>
                 )}
                 {roman && (
@@ -240,6 +254,16 @@ export function ChordWheel() {
                 {hover && sharedPcs.size > 0 && sharedPcs.has(root) && (
                   <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
                 )}
+                {(() => {
+                  const sg = suggestions.get(`${root}-${ring.quality}`);
+                  if (!sg) return null;
+                  const [dx, dy] = pt(ring.r0 + 9, angle);
+                  return (
+                    <circle cx={dx} cy={dy} r={5} className="suggest-dot" opacity={0.25 + 0.75 * sg.weight}>
+                      <title>{`Sugestão: ${sg.reason}`}</title>
+                    </circle>
+                  );
+                })()}
               </g>
             );
           }),
@@ -357,7 +381,7 @@ function WheelHint() {
           <b>{diatonic} diatônicos</b>
           {chromatic > 0 && (
             <>
-              {" "}+ <b>{chromatic} cromáticos</b> (dominantes secundárias e empréstimos modais)
+              {" "}+ <b>{chromatic} cromáticos</b> (dominantes secundárias, empréstimos modais, ii/x e subV)
             </>
           )}{" "}
           de 36 liberados. {go("free", "Livre")} libera todos.
@@ -373,12 +397,19 @@ export function DegreeStrip() {
   const ctx = useCtx();
   const spell = useSpeller();
   const soundOnClick = useStore((s) => s.soundOnClick);
-  const { addChord } = useStore.getState();
+  const { addChord, toggleMod } = useStore.getState();
   if (!ctx) return null;
 
   const add = (root: PitchClass, q: QualityId) => {
     const chord = addChord(root, q);
     if (chord && soundOnClick) previewChord(chord);
+  };
+
+  const addSeventh = (root: PitchClass, sv: SeventhInfo) => {
+    const chord = addChord(root, sv.quality);
+    if (!chord) return;
+    for (const m of sv.modifiers) toggleMod(chord.id, m);
+    if (soundOnClick) previewChord({ ...chord, modifiers: sv.modifiers });
   };
 
   return (
@@ -398,6 +429,11 @@ export function DegreeStrip() {
                     {chordSymbol(makeChord(d.root, q), spell)}
                   </button>
                 ))}
+              {d.sevenths.map((sv) => (
+                <button key={sv.label} className="chip tiny seventh" onClick={() => addSeventh(d.root, sv)} title={`Sétima: ${sv.label}`}>
+                  {chordSymbol({ ...makeChord(d.root, sv.quality), modifiers: sv.modifiers }, spell)}
+                </button>
+              ))}
             </div>
           </div>
         ) : (

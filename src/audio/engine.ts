@@ -18,6 +18,12 @@ export type PlayOptions = {
   channelFor: (blockId: string) => number;
   onEvent: (index: number) => void;
   onEnd: () => void;
+  /** Tônica (pitch class) de cada bloco, para o bordão. */
+  tonicFor?: (blockId: string) => number | null;
+  /** Re-ataca acordes longos a cada compasso em instrumentos de decay. */
+  reattack?: boolean;
+  /** Condução de vozes entre acordes do mesmo bloco. */
+  voiceLeading?: boolean;
 };
 
 type Player = typeof import("./player");

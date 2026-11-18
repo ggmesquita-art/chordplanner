@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { instrumentProgress, instrumentStatus, play, previewNotes, stop, subscribeStatus } from "../audio/engine";
+import { instrumentProgress, instrumentStatus, play, type PlayOptions, previewNotes, stop, subscribeStatus } from "../audio/engine";
 import { configureMidi, midiSnapshot, subscribeMidi } from "../audio/midi";
 import type { Chord } from "../core/chords";
 import { makeSpeller, type Speller } from "../core/pitch";
@@ -54,18 +54,22 @@ export async function togglePlay() {
   const expanded = region ? expandRegion(s.song, s.selectedItem, region.from, region.to) : expandArrangement(s.song, only);
   if (!expanded.events.length) return;
   s.setPlaying(true);
-  await play(expanded, {
+  const opts: PlayOptions = {
     channelFor: (blockId) => useStore.getState().song.blocks[blockId]?.midiChannel ?? useStore.getState().midi.channel,
     loop: s.loop,
     metronome: s.metronome,
     countIn: s.countIn,
     swing: s.song.swing,
+    tonicFor: () => useStore.getState().tonic,
+    reattack: s.song.reattack,
+    voiceLeading: s.song.voiceLeading,
     onEvent: (i) => {
       const ev = expanded.events[i];
       useStore.getState().setPlayhead({ itemIndex: ev.itemIndex, chordIndex: ev.chordIndex, eventIndex: i });
     },
     onEnd: () => useStore.getState().setPlaying(false),
-  });
+  };
+  await play(expanded, opts);
 }
 
 export function stopPlayback() {

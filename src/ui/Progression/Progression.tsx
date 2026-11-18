@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getInstrumentDef } from "../../audio/instruments";
+import { FUNCTION_NAME, harmonicFunction } from "../../core/analysis";
 import { chordSymbol } from "../../core/modifiers";
 import { blockBeats, blockBpm, blockMeter, type PlaybackPattern } from "../../core/song";
 import { GRIDS, METERS, barLinesWithin, formatPosition, gridBeats, meterLabel, missingBeats, stepDuration, type Grid, type Meter } from "../../core/timeline";
-import { chordRole, chordStarts, droppedByChord, rulerMarks } from "../../core/view";
+import { chordRole, chordStarts, chromaticTitle, droppedByChord, rulerMarks } from "../../core/view";
 import { selectRegion, useStore } from "../../state/store";
 import { songToText } from "../../export/text";
 import { exportJson, shareUrl } from "../fileActions";
@@ -12,6 +13,7 @@ import { NumberField } from "../NumberField";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { InstrumentPicker } from "../InstrumentPicker/InstrumentPicker";
 import { PATTERNS } from "../patterns";
+import { BlockPlayback } from "./BlockPlayback";
 import { ResizeHandle } from "./ResizeHandle";
 
 const GRID_LABEL: Record<string, string> = { "0.5": "½ tempo", "1": "1 tempo", "2": "2 tempos", "4": "4 tempos", bar: "compasso" };
@@ -236,6 +238,7 @@ export function Progression() {
           <span className="muted">
             {blockBpm(song, block)} bpm · {meterLabel(meter)}
           </span>
+          <BlockPlayback key={block.id} blockId={block.id} />
         </div>
       </div>
 
@@ -286,7 +289,7 @@ export function Progression() {
             const st = useStore.getState();
             // @tonejs/midi só é baixado quando alguém exporta.
             void import("../../export/midi").then(({ downloadMidi, songToMidi }) =>
-              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true }), st.songName),
+              downloadMidi(songToMidi(st.song, { channel: st.midi.channel, splitBass: true, tonic: st.tonic }), st.songName),
             );
           }}
         >
@@ -316,6 +319,7 @@ export function Progression() {
         {block.chords.map((c, i) => {
           const start = starts[i];
           const { inScale, chromatic, roman } = chordRole(ctx, c);
+          const fn = ctx ? harmonicFunction(ctx, c) : null;
           const shown = live?.id === c.id ? live.beats : c.duration;
           const crosses = barLinesWithin(start, shown, meter).length > 0;
           const inRegion = !!region && i >= region.from && i <= region.to;
@@ -371,13 +375,13 @@ export function Progression() {
                   actions.removeChord(c.id);
                 }
               }}
-              aria-label={`${chordSymbol(c, spell)}, ${roman}, ${shown} tempos`}
+              aria-label={`${chordSymbol(c, spell)}, ${roman}${fn ? `, ${FUNCTION_NAME[fn].toLowerCase()}` : ""}, ${shown} tempos`}
             >
               <div className="chord-top">
                 <span className="chord-symbol">{chordSymbol(c, spell)}</span>
                 {!inScale &&
                   (chromatic ? (
-                    <span className="chromatic-mark" title={chromatic.kind === "secondary" ? `Dominante secundária (resolve em ${chromatic.target})` : `Empréstimo modal de ${chromatic.from}`}>
+                    <span className="chromatic-mark" title={chromaticTitle(chromatic, false)}>
                       ◐
                     </span>
                   ) : (
@@ -395,7 +399,14 @@ export function Progression() {
                   </span>
                 )}
               </div>
-              <div className="chord-roman">{roman}</div>
+              <div className="chord-roman">
+                {roman}
+                {fn && (
+                  <span className="fn-badge" title={FUNCTION_NAME[fn]} aria-hidden="true">
+                    {fn}
+                  </span>
+                )}
+              </div>
               <div className="chord-bottom" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="icon-btn tiny"

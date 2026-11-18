@@ -37,16 +37,17 @@ describe("App (fumaça)", () => {
     const chords = selectBlock(useStore.getState())!.chords;
     expect(chords.map((c) => c.root)).toEqual([2, 7, 9]);
 
-    // Colorido libera diatônicos + cromáticos idiomáticos; Estrito só diatônicos; Livre tudo.
+    // Colorido libera diatônicos + cromáticos idiomáticos (V/x, empréstimos de modos com a mesma
+    // tônica, ii/x e subV — 18 em Ré maior); Estrito só diatônicos; Livre tudo.
     const enabled = () => screen.getAllByRole("button").filter((b) => b.classList.contains("slice") && b.getAttribute("aria-disabled") === "false");
-    expect(enabled().length).toBe(18);
+    expect(enabled().length).toBe(25);
     const fs = screen.getAllByRole("button").find((b) => b.getAttribute("aria-label")?.startsWith("Fá sustenido maior"))!;
     expect(fs.getAttribute("aria-label")).toContain("V/vi");
     const gs = screen.getAllByRole("button").find((b) => b.getAttribute("aria-label")?.startsWith("Sol sustenido maior"))!;
     expect(gs.getAttribute("aria-disabled")).toBe("true");
     await act(async () => useStore.getState().setMode("strict"));
     expect(enabled().length).toBe(7);
-    expect(document.querySelector(".wheel-hint")!.textContent).toContain("Colorido libera +11");
+    expect(document.querySelector(".wheel-hint")!.textContent).toContain("Colorido libera +18");
     await act(async () => useStore.getState().setMode("free"));
     expect(enabled().length).toBe(36);
     await act(async () => useStore.getState().setMode("colorful"));

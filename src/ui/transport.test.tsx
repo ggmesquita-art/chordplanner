@@ -90,3 +90,20 @@ describe("escopo Região", () => {
     expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Arranjo" }));
   });
 });
+
+describe("condução de vozes e re-ataque", () => {
+  it("os toggles alternam song.voiceLeading e song.reattack", () => {
+    render(<Transport />);
+    const vl = screen.getByRole("button", { name: "Condução de vozes" });
+    fireEvent.click(vl);
+    expect(useStore.getState().song.voiceLeading).toBe(true);
+    expect(vl.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(vl);
+    expect(useStore.getState().song.voiceLeading).toBeFalsy();
+    const ra = screen.getByRole("button", { name: "Re-atacar" });
+    fireEvent.click(ra);
+    expect(useStore.getState().song.reattack).toBe(true);
+    fireEvent.click(ra);
+    expect(useStore.getState().song.reattack).toBeFalsy();
+  });
+});

@@ -112,6 +112,56 @@ describe("cromatismos idiomáticos (§3.7)", () => {
   });
 });
 
+describe("cromatismos: ii secundário e outros empréstimos", () => {
+  const C = scaleContext(0, "major");
+  const Am = scaleContext(9, "minor");
+  it("ii secundário: ii°/ii e ii°/iii em Dó maior; ii/VI em Lá menor", () => {
+    expect(chromaticFunction(C, 4, "dim")).toMatchObject({ kind: "supertonic", label: "ii°/ii", target: "ii" });
+    expect(chromaticFunction(C, 6, "dim")).toMatchObject({ kind: "supertonic", label: "ii°/iii" });
+    expect(chromaticFunction(Am, 7, "m")).toMatchObject({ kind: "supertonic", label: "ii/♭VI" });
+  });
+
+  it("outros empréstimos: ♭vii do frígio, vi° do dórico, ♯iv° do lídio", () => {
+    expect(chromaticFunction(C, 10, "m")).toMatchObject({ kind: "borrowed", label: "♭vii", from: "Frígio" });
+    expect(chromaticFunction(C, 9, "dim")).toMatchObject({ kind: "borrowed", label: "vi°", from: "Dórico" });
+  });
+
+  it("prioridade: dominante secundária > paralelo > ii secundário > outros modos", () => {
+    expect(chromaticFunction(C, 7, "m")).toMatchObject({ kind: "borrowed", label: "v", from: "Eólio (Menor natural)" }); // não ii/IV
+    expect(chromaticFunction(C, 2, "maj")).toMatchObject({ kind: "secondary" });
+    expect(chromaticFunction(C, 6, "dim")).toMatchObject({ kind: "supertonic" }); // não ♯iv° do lídio
+  });
+
+  it("♭II maior é o substituto de trítono (subV → I); ♯IV maior segue sem função", () => {
+    expect(chromaticFunction(C, 1, "maj")).toMatchObject({ kind: "subV", label: "subV", target: "I" });
+    expect(chromaticFunction(scaleContext(9, "minor"), 10, "maj")).toMatchObject({ kind: "subV", target: "i" });
+    expect(chromaticFunction(C, 6, "maj")).toBeNull();
+  });
+});
+
+describe("sétimas por grau (§2.5)", () => {
+  const labels = (ctx: ReturnType<typeof scaleContext>, i: number) => ctx.degrees[i].sevenths.map((s) => s.label);
+  it("Dó maior: I maj7, V 7, VII m7♭5", () => {
+    const C = scaleContext(0, "major");
+    expect(labels(C, 0)).toEqual(["maj7"]);
+    expect(labels(C, 4)).toEqual(["7"]);
+    expect(labels(C, 1)).toEqual(["m7"]);
+    expect(labels(C, 6)).toEqual(["m7♭5"]);
+  });
+
+  it("Bebop dominante de Sol reconhece G7", () => {
+    const G = scaleContext(7, "bebop-dominant");
+    expect(labels(G, 0)).toContain("7");
+    expect(G.degrees[0].sevenths.find((s) => s.label === "7")).toMatchObject({ quality: "maj", modifiers: [{ kind: "ext", value: 7 }] });
+  });
+
+  it("menor harmônica tem m(maj7) e °7", () => {
+    const A = scaleContext(9, "harmonic-minor");
+    expect(labels(A, 0)).toContain("m(maj7)");
+    expect(labels(A, 6)).toContain("°7");
+  });
+});
+
 describe("grafia (§2.6)", () => {
   it("toda escala heptatônica gera 7 letras distintas nas 12 tônicas", () => {
     for (const sc of SCALES.filter((s) => s.intervals.length === 7)) {

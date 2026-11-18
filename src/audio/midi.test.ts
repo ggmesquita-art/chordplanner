@@ -270,3 +270,42 @@ describe("panic (porta selecionada, só com MIDI em uso)", () => {
     expect(sent.b).toContainEqual([0xb0, 123, 0]);
   });
 });
+
+describe("export .mid: rampa e camada de baixo", () => {
+  it("rampa gera vários pontos de tempo, o último perto de rampTo", () => {
+    const song = song2();
+    const a = song.blocks[song.arrangement[0].blockId];
+    a.bpm = 120;
+    a.rampTo = 60;
+    song.arrangement.pop();
+    const midi = new Midi(songToMidi(song, { channel: 1, splitBass: true }));
+    const t = midi.header.tempos;
+    expect(t.length).toBe(8);
+    expect(t[0].bpm).toBeLessThan(120);
+    expect(t[0].bpm).toBeGreaterThan(100);
+    expect(t[t.length - 1].bpm).toBeLessThan(75);
+    expect(t[t.length - 1].bpm).toBeGreaterThan(60);
+    expect(t.every((p, i) => i === 0 || (p.ticks > t[i - 1].ticks && p.bpm < t[i - 1].bpm))).toBe(true);
+    expect(midi.header.timeSignatures.length).toBe(1);
+  });
+
+  it("trilha de baixo usa o program do bassInstrument", () => {
+    const song = song2();
+    song.blocks[song.arrangement[0].blockId].bassInstrument = "cello";
+    const midi = new Midi(songToMidi(song, { channel: 1, splitBass: true }));
+    const bass = midi.tracks.filter((t) => t.name === "Baixo");
+    const cello = bass.find((t) => t.instrument.number === 42);
+    expect(cello?.notes.map((n) => n.midi)).toEqual([36, 43]);
+    expect(bass.find((t) => t.instrument.number === 32)?.notes.map((n) => n.midi)).toEqual([41]);
+  });
+
+  it("respeita voiceLeading e reattack da música", () => {
+    const song = song2();
+    song.blocks[song.arrangement[0].blockId].chords = [makeChord(0, "maj", 8)];
+    song.arrangement.pop();
+    const count = () => new Midi(songToMidi(song, { channel: 1, splitBass: true })).tracks.find((t) => t.name === "Acordes")!.notes.length;
+    const before = count();
+    song.reattack = true;
+    expect(count()).toBe(before * 2);
+  });
+});

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getInstrumentDef } from "../../audio/instruments";
+import type { VoicingId } from "../../core/chords";
 import {
   conflictingModifier,
   hasModifier,
@@ -62,6 +63,14 @@ const STATUS_TEXT: Record<NoteStatus, string> = {
   outside: "fora da escala, sem uso idiomático",
 };
 const labelOf = (m: Modifier) => GROUPS.flatMap((g) => g.items).find(([x]) => sameModifier(x, m))?.[1] ?? "";
+const VOICINGS: [VoicingId, string][] = [
+  ["closed", "Fechado"],
+  ["open", "Aberto"],
+  ["drop2", "Drop 2"],
+  ["drop3", "Drop 3"],
+  ["quartal", "Quartal"],
+  ["shell", "Shell"],
+];
 const ORDINAL = ["Fund.", "1ª", "2ª", "3ª", "4ª", "5ª", "6ª"];
 
 export function ModifierPanel() {
@@ -211,8 +220,20 @@ export function ModifierPanel() {
       <fieldset className="mod-group">
         <legend>Voicing</legend>
         <div className="mod-buttons">
-          <select disabled aria-label="Voicing" title="Aberto, Drop 2/3, Quartal e Shell chegam na v2">
-            <option>Fechado</option>
+          <select
+            value={chord.voicing ?? "closed"}
+            onChange={(e) => {
+              actions.setVoicing(chord.id, e.target.value as VoicingId);
+              const updated = selectChord(useStore.getState());
+              if (updated) previewChord(updated);
+            }}
+            aria-label="Voicing"
+          >
+            {VOICINGS.map(([v, t]) => (
+              <option key={v} value={v}>
+                {t}
+              </option>
+            ))}
           </select>
           <span className="field small">
             Oitava

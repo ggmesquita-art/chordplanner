@@ -2,7 +2,7 @@
 // eventos com posição absoluta — consumido pelo áudio, pela régua e pelo export.
 
 import type { Chord } from "./chords";
-import { missingBeats, secondsPerBeat, type Meter } from "./timeline";
+import { missingBeats, rampBpmAt, rampSeconds, secondsPerBeat, type Meter } from "./timeline";
 
 export type PlaybackPattern = "block" | "arp-up" | "arp-down" | "comping";
 
@@ -66,6 +66,10 @@ export type TimedChord = {
   meter: Meter;
   pattern: PlaybackPattern;
   instrument: InstrumentId;
+  /** BPM ao fim do acorde; só difere de `bpm` dentro de uma rampa (`rampTo`). */
+  endBpm?: number;
+  bassInstrument?: InstrumentId;
+  drone?: boolean;
 };
 
 export type Marker = {
@@ -78,7 +82,11 @@ export type Marker = {
   meter: Meter;
 };
 
-export type TempoPoint = { startSec: number; bpm: number; meter: Meter };
+/**
+ * Mudança de andamento/compasso. Numa rampa (`rampTo`) há um ponto por tempo, com o BPM médio daquele
+ * tempo (`ramp: true`); `startBeat` é o tempo absoluto, para o export MIDI achar o tick mesmo no meio de um acorde.
+ */
+export type TempoPoint = { startSec: number; bpm: number; meter: Meter; startBeat?: number; ramp?: boolean };
 
 export type Expanded = {
   events: TimedChord[];
@@ -110,20 +118,43 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
   if (!block) return;
   const bpm = blockBpm(song, block);
   const meter = blockMeter(song, block);
-  const spb = secondsPerBeat(bpm);
+  const total = blockBeats(block);
+  const target = block.rampTo !== undefined && block.rampTo !== bpm && total > 0 ? block.rampTo : undefined;
   const last = a.tempoMap[a.tempoMap.length - 1];
-  if (!last || last.bpm !== bpm || last.meter.join("/") !== meter.join("/")) {
-    a.tempoMap.push({ startSec: a.sec, bpm, meter });
+  if (target === undefined && (!last || last.ramp || last.bpm !== bpm || last.meter.join("/") !== meter.join("/"))) {
+    a.tempoMap.push({ startSec: a.sec, bpm, meter, startBeat: a.beatAbs });
   }
   a.markers.push({ itemIndex, blockId: block.id, name: block.name, startSec: a.sec, startBar: a.bars, bpm, meter });
+  // Segundos entre duas posições da passada (rampa linear de BPM; sem `rampTo`, andamento constante).
+  const secs = (b0: number, b1: number) => (target === undefined ? (b1 - b0) * secondsPerBeat(bpm) : rampSeconds(total, bpm, target, b0, b1));
+
+  // Região da passada que será emitida (acordes from..to).
+  let regionStart = Infinity;
+  let regionEnd = 0;
+  let p = 0;
+  block.chords.forEach((c, i) => {
+    if (i >= from && i <= to) {
+      regionStart = Math.min(regionStart, p);
+      regionEnd = p + c.duration;
+    }
+    p += c.duration;
+  });
 
   for (let rep = 0; rep < repeat; rep++) {
     let beatsDone = 0;
     let pos = 0;
+    // Rampa: um ponto de tempo por tempo, com o BPM médio dele (o export MIDI reproduz a rampa por degraus).
+    if (target !== undefined && regionStart < regionEnd) {
+      for (let b = regionStart; b < regionEnd - 1e-9; b += 1) {
+        const end = Math.min(b + 1, regionEnd);
+        a.tempoMap.push({ startSec: a.sec + secs(regionStart, b), bpm: (60 * (end - b)) / secs(b, end), meter, startBeat: a.beatAbs + (b - regionStart), ramp: true });
+      }
+    }
     block.chords.forEach((chord, chordIndex) => {
       const blockBeat = pos;
       pos += chord.duration;
       if (chordIndex < from || chordIndex > to) return;
+      const durationSec = secs(blockBeat, blockBeat + chord.duration);
       a.events.push({
         chord,
         blockId: block.id,
@@ -134,17 +165,20 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
         blockBeat,
         beats: chord.duration,
         startSec: a.sec,
-        durationSec: chord.duration * spb,
-        bpm,
+        durationSec,
+        bpm: target === undefined ? bpm : rampBpmAt(total, bpm, target, blockBeat),
+        endBpm: target === undefined ? bpm : rampBpmAt(total, bpm, target, blockBeat + chord.duration),
         meter,
         pattern: block.pattern ?? song.pattern,
         instrument: block.instrument ?? song.instrument,
+        ...(block.bassInstrument ? { bassInstrument: block.bassInstrument } : {}),
+        ...(block.drone ? { drone: true } : {}),
       });
       a.beatAbs += chord.duration;
-      a.sec += chord.duration * spb;
+      a.sec += durationSec;
       beatsDone += chord.duration;
     });
-    a.bars += (from === 0 && to === Infinity ? blockBeats(block) : beatsDone) / meter[0];
+    a.bars += (from === 0 && to === Infinity ? total : beatsDone) / meter[0];
   }
 }
 

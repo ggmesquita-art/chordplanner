@@ -19,8 +19,10 @@ export function Transport() {
   const hasRegion = useStore((s) => selectRegion(s) !== null);
   const metronome = useStore((s) => s.metronome);
   const countIn = useStore((s) => s.countIn);
+  const voiceLeading = !!song.voiceLeading;
+  const reattack = !!song.reattack;
   const follow = useStore((s) => s.followPlayback);
-  const { setBpm, setMeter, setSwing, setLoop, setPlayScope, setMetronome, setCountIn, setPattern, setFollowPlayback } = useStore.getState();
+  const { setSongProps, setBpm, setMeter, setSwing, setLoop, setPlayScope, setMetronome, setCountIn, setPattern, setFollowPlayback } = useStore.getState();
   const taps = useRef<number[]>([]);
 
   const tap = () => {
@@ -94,6 +96,22 @@ export function Transport() {
       </button>
       <button className={`toggle ${countIn ? "on" : ""}`} onClick={() => setCountIn(!countIn)} aria-pressed={countIn} title="Um compasso de contagem antes de tocar">
         ⏺ Contagem
+      </button>
+      <button
+        className={`toggle ${voiceLeading ? "on" : ""}`}
+        onClick={() => setSongProps({ voiceLeading: !voiceLeading })}
+        aria-pressed={voiceLeading}
+        title="Escolhe a inversão de cada acorde com o menor movimento em relação ao anterior"
+      >
+        Condução de vozes
+      </button>
+      <button
+        className={`toggle ${reattack ? "on" : ""}`}
+        onClick={() => setSongProps({ reattack: !reattack })}
+        aria-pressed={reattack}
+        title="Em instrumentos que decaem (piano, harpa, koto…), repete o acorde a cada compasso em acordes longos"
+      >
+        Re-atacar
       </button>
       <MidiPanel />
       <button className={`toggle ${follow ? "on" : ""}`} onClick={() => setFollowPlayback(!follow)} aria-pressed={follow} title="A progressão acompanha o bloco que está tocando">

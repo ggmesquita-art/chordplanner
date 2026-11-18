@@ -10,7 +10,7 @@ import { getInstrumentDef } from "./instruments";
 import { ensureInstrument, limiterInput, pinPlaying, pinPreview, releaseAllVoices } from "./loaders";
 import { midiActive, midiChannel, midiMutesBrowser, noteOff, noteOn, panic, toMidiTime } from "./midi";
 import type { PlayOptions } from "./engine";
-import { countIn, metronomeClicks, renderNotes, strike, strumFor } from "./render";
+import { countIn, metronomeClicks, renderNotes, strike, strumFor, type PlaybackExtras } from "./render";
 
 export { disposeInstrument, preload } from "./loaders";
 
@@ -139,10 +139,12 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
     }
   }
 
+  const extra: PlaybackExtras = { tonicFor: opts.tonicFor, reattack: opts.reattack, voiceLeading: opts.voiceLeading };
+
   // Saída MIDI: notas sem ajuste de tessitura (o plugin decide o timbre). Cada evento
   // passa pelo Transport, então parar cancela o que ainda não saiu.
   if (midiActive()) {
-    for (const n of renderNotes(expanded, { swing: opts.swing, fitToInstrument: false, humanize: true, channelFor: opts.channelFor })) {
+    for (const n of renderNotes(expanded, { swing: opts.swing, fitToInstrument: false, humanize: true, channelFor: opts.channelFor, ...extra })) {
       transport.schedule((time) => noteOn(n.channel, n.midi, n.velocity, toMidiTime(time, rawCtx())), offset + n.time);
       transport.schedule((time) => noteOff(n.channel, n.midi, toMidiTime(time, rawCtx())), offset + n.time + n.duration);
     }
@@ -150,7 +152,7 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
 
   // Áudio do navegador. Os instrumentos da execução ficam protegidos do descarte LRU.
   if (!midiMutesBrowser()) {
-    const notes = renderNotes(expanded, { swing: opts.swing, fitToInstrument: true, humanize: true });
+    const notes = renderNotes(expanded, { swing: opts.swing, fitToInstrument: true, humanize: true, ...extra });
     pinPlaying(notes.map((n) => n.instrument));
     for (const n of notes) {
       const entry = ensureInstrument(n.instrument);
