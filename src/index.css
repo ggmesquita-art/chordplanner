@@ -1232,6 +1232,7 @@ section {
   cursor: not-allowed;
 }
 .mod-bar {
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1300,6 +1301,9 @@ section {
   }
   .modifiers:not(.open) > :not(.mod-bar) {
     display: none;
+  }
+  .modifiers:not(.open) .mod-bar {
+    margin-bottom: 0;
   }
 }
 
@@ -1374,7 +1378,7 @@ section {
   font-size: 14px;
   line-height: 1;
   color: var(--tension);
-  pointer-events: auto;
+  pointer-events: none;
 }
 .chord-card.crosses-bar {
   border-top-color: color-mix(in srgb, var(--tension) 45%, var(--line));

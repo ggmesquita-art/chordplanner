@@ -11,7 +11,7 @@ export function Arrangement() {
   const { selectItem, addBlock, addLinkedInstance, makeUnique, removeItem, moveItem, setRepeat, renameBlock, applyTemplate, setBlockProps } = useStore.getState();
   const [editing, setEditing] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [confirmTemplate, setConfirmTemplate] = useState<TemplateId | null>(null);
   const [announce, setAnnounce] = useState("");
   const laneRef = useRef<HTMLDivElement>(null);
@@ -27,7 +27,7 @@ export function Arrangement() {
   });
 
   // A confirmação só vale enquanto o mesmo bloco estiver selecionado.
-  const pendingRemove = confirmRemove === selected ? confirmRemove : null;
+  const pendingRemove = confirmRemove !== null && song.arrangement[selected]?.id === confirmRemove ? confirmRemove : null;
   const removeTitle = (n: number) => (n > 1 ? "Remove só esta instância; o bloco continua nas outras" : "Remover do arranjo");
   const usage = new Map<string, number>();
   for (const it of song.arrangement) usage.set(it.blockId, (usage.get(it.blockId) ?? 0) + 1);
@@ -83,7 +83,7 @@ export function Arrangement() {
               data-item-id={item.id}
               tabIndex={0}
               aria-current={i === selected ? "true" : undefined}
-              aria-label={`Bloco ${block.name}, ×${item.repeat}, compassos ${Math.floor(start)}–${Math.max(Math.floor(start), Math.ceil(start + bars - 1))}`}
+              aria-label={`Bloco “${block.name}”, ×${item.repeat}, compassos ${Math.floor(start)}–${Math.max(Math.floor(start), Math.ceil(start + bars - 1))}`}
               aria-keyshortcuts="Enter Space ArrowLeft ArrowRight Alt+ArrowLeft Alt+ArrowRight"
               title="Alt+←/→ move o bloco"
               onKeyDown={(e) => {
@@ -196,7 +196,7 @@ export function Arrangement() {
                     ))}
                   </div>
                   {song.arrangement.length > 1 &&
-                    (pendingRemove === i ? (
+                    (pendingRemove === item.id ? (
                       <span className="confirm small">
                         <button className="btn danger" onClick={() => (removeItem(i), setConfirmRemove(null))} title={removeTitle(usage.get(block.id) ?? 0)}>
                           Excluir
@@ -206,7 +206,7 @@ export function Arrangement() {
                         </button>
                       </span>
                     ) : (
-                      <button className="icon-btn danger" onClick={() => setConfirmRemove(i)} title={removeTitle(usage.get(block.id) ?? 0)} aria-label="Remover do arranjo">
+                      <button className="icon-btn danger" onClick={() => setConfirmRemove(item.id)} title={removeTitle(usage.get(block.id) ?? 0)} aria-label="Remover do arranjo">
                         🗑
                       </button>
                     ))}

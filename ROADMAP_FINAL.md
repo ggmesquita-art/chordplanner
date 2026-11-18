@@ -60,23 +60,23 @@ Instrumentos e layout (§3.1, §3.9, §5.2)
 
 ## Etapa 2 — Acessibilidade (§8)
 
-- [ ] Progressão: Enter seleciona o card; reordenar pelo teclado.
-- [ ] Arranjo: cards focáveis e reordenáveis pelo teclado.
-- [ ] Opções de escala e de instrumento navegáveis pelo teclado; setas nos controles segmentados do cabeçalho.
+- [x] Progressão: Enter seleciona o card; ←/→ movem o foco; Alt+←/→ reordenam (com anúncio para leitor de tela).
+- [x] Arranjo: cards focáveis e reordenáveis pelo teclado.
+- [x] Opções de escala e de instrumento navegáveis pelo teclado (↑↓, Enter, Alt+P ouve); setas nos controles segmentados.
 - [x] `prefers-reduced-motion` para a rotação da roda e o pulso do acorde tocando.
 - [ ] Ícone além da cor em todos os estados da roda (✓ diatônico, ◐ cromático, ⚠ fora).
-- [ ] Toggle manual de tema claro/escuro (hoje só segue o sistema).
-- [ ] Menu "Abrir": remover o botão aninhado dentro de `role="option"`.
+- [x] Toggle de tema Auto/Claro/Escuro.
+- [x] Menu "Abrir": lista simples, sem botão aninhado em `role="option"`.
 
 ## Etapa 3 — Qualidade técnica
 
 Áudio (`src/audio/engine.ts`)
-- [ ] Liberar instrumentos que saíram de uso (não há nenhum `dispose`; o mapa de carregados só cresce).
-- [ ] `stop()` deve cancelar também os previews já agendados.
-- [ ] `panic()` só deve enviar mensagens quando a saída MIDI estiver ligada.
-- [ ] Metrônomo e contagem passando pelo bus master.
-- [ ] Tratar o AudioContext suspenso no meio da sessão e dar timeout em carregamento travado.
-- [ ] Extrair o carregamento de samples para `audio/loaders.ts`, como previsto no §7.
+- [x] Liberar instrumentos que saíram de uso (LRU: no máximo 6 sampleados e 8 synths).
+- [x] `stop()` cancela também os previews agendados.
+- [x] `panic()` só age na porta MIDI em uso; `panicAll()` separado.
+- [x] Metrônomo e contagem pelo limiter do bus master (sem reverb).
+- [x] AudioContext suspenso encerra a reprodução; timeout de 20 s no carregamento de samples.
+- [x] Carregamento de samples extraído para `audio/loaders.ts`.
 
 Arquitetura (§7)
 - [ ] Tirar o cálculo musical de dentro dos componentes (`ScalePicker`, `ChordWheel`, `ModifierPanel`, `InstrumentPicker`, `Progression`, `Arrangement`, `Transport`) e levá-lo para `core/` ou seletores.

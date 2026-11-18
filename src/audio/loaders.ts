@@ -462,8 +462,11 @@ export function ensureInstrument(id: string): Loaded {
   evictExcess(id);
   notifyStatus();
 
+  // Progresso do smplr só vale enquanto ele é a tentativa em curso (callbacks tardios são ignorados).
+  let smplrActive = true;
   const fallBackToGm = () => {
     if (entry.disposed) return;
+    smplrActive = false;
     clearProgress(id);
     entry.release?.(); // descarta a instância do smplr que falhou
     entry.release = undefined;
@@ -478,7 +481,7 @@ export function ensureInstrument(id: string): Loaded {
     return entry;
   }
   try {
-    const inst = createSmplr(def.source.smplr, (p) => reportProgress(id, p));
+    const inst = createSmplr(def.source.smplr, (p) => void (smplrActive && reportProgress(id, p)));
     entry.release = () => inst.dispose();
     withTimeout(inst.ready, LOAD_TIMEOUT_MS).then(
       () => {

@@ -1,7 +1,7 @@
 import { Midi } from "@tonejs/midi";
 import { describe, expect, it, vi } from "vitest";
 import { makeChord } from "../core/chords";
-import { expandArrangement, makeBlock, makeSong } from "../core/song";
+import { expandArrangement, expandRegion, makeBlock, makeSong } from "../core/song";
 import { songToMidi } from "../export/midi";
 import { configureMidi, DEFAULT_MIDI, initMidi, midiActive, noteOff, noteOn, panic } from "./midi";
 import { countIn, metronomeClicks, renderNotes } from "./render";
@@ -164,6 +164,28 @@ describe("metronomeClicks", () => {
   it("reinicia a contagem a cada repetição do bloco", () => {
     const c = build([4, 4], [2], 2);
     expect(c.map((x) => x.accent)).toEqual([true, false, true, false]);
+  });
+
+  it("acorde de ½ tempo não silencia o metrônomo: cliques seguem a grade do bloco", () => {
+    const c = build([4, 4], [0.5, 2, 1.5]);
+    expect(c.map((x) => x.time)).toEqual([0, 1, 2, 3]);
+    expect(c.map((x) => x.accent)).toEqual([true, false, false, false]);
+    // 6/8 com acorde fracionário: pulsos em 0 e 3 continuam.
+    expect(build([6, 8], [0.5, 5.5]).map((x) => x.time)).toEqual([0, 3]);
+  });
+
+  it("região que começa no meio do compasso: acento no tempo 1 real do compasso", () => {
+    const song = makeSong();
+    song.bpm = 60;
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.chords = [1, 1, 2, 4].map((d) => makeChord(0, "maj", d)); // 3º acorde começa no tempo 3
+    const c = metronomeClicks(expandRegion(song, 0, 2, 3));
+    expect(c.map((x) => x.time)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(c.map((x) => x.accent)).toEqual([false, false, true, false, false, false]);
+    // A contagem cobre um compasso + os 2 tempos até o início da região.
+    const ci = countIn(expandRegion(song, 0, 2, 3));
+    expect(ci.seconds).toBe(6);
+    expect(ci.clicks.map((x) => x.accent)).toEqual([true, false, false, false, true, false]);
   });
 });
 

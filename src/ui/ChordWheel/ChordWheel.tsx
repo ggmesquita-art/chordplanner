@@ -99,7 +99,8 @@ export function ChordWheel() {
       setMenu(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
       setMenu(null);
       badgeRefs.current.get(menuRoot)?.focus();
     };
@@ -162,6 +163,8 @@ export function ChordWheel() {
   const clickable = (st: SliceState) => st === "explore" || st === "diatonic" || (st === "chromatic" && mode !== "strict") || mode === "free";
 
   const activate = (root: PitchClass, quality: QualityId) => {
+    // Menu radial: devolve o foco ao badge que o abriu (o menu some ao escolher).
+    if (menu) badgeRefs.current.get(menu.root)?.focus();
     setMenu(null);
     if (tonic === null) {
       setTonic(root);
@@ -253,7 +256,7 @@ export function ChordWheel() {
                     {roman}
                   </text>
                 )}
-                {hover && sharedPcs.size > 0 && sharedPcs.has(majorRoot) && (
+                {hover && sharedPcs.size > 0 && sharedPcs.has(root) && (
                   <circle cx={pt(ring.r1 - 6, angle)[0]} cy={pt(ring.r1 - 6, angle)[1]} r={3.5} className="shared-dot" />
                 )}
               </g>

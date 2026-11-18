@@ -137,3 +137,17 @@ describe("notas em comum", () => {
     expect(sharedPitchClasses({ root: 0, quality: "maj" }, null).size).toBe(0);
   });
 });
+
+describe("ponto de nota em comum", () => {
+  it("aparece nas fatias cuja fundamental é comum (Dó, Mi), não em Lá menor", () => {
+    act(() => {
+      useStore.getState().setTonic(0);
+      useStore.getState().addChord(9, "m");
+    });
+    render(<App />);
+    fireEvent.mouseEnter(slice("Dó maior"));
+    const dot = (name: string) => slice(name).querySelector(".shared-dot");
+    for (const n of ["Dó maior", "Mi maior", "Dó menor", "Mi menor", "Dó diminuto", "Mi diminuto"]) expect(dot(n), n).not.toBeNull();
+    for (const n of ["Lá menor", "Sol maior", "Lá maior", "Lá diminuto"]) expect(dot(n), n).toBeNull();
+  });
+});

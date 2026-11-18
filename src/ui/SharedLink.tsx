@@ -59,7 +59,11 @@ export function SharedLink() {
 
   useEffect(() => {
     if (!asking) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && finish();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      finish();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [asking]);

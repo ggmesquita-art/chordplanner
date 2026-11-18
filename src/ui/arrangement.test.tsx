@@ -39,8 +39,12 @@ describe("barTicks", () => {
     expect(t.map((x) => x.bar)).toEqual([1, 5, 9, 13, 17, 21, 25, 29]);
     expect(t[1].at).toBeCloseTo(4 / 32);
   });
-  it("fracionário não passa do último compasso inteiro", () => {
-    expect(barTicks(3, 2.5).map((x) => x.bar)).toEqual([3, 4]);
+  it("fracionário: marca os compassos inteiros que começam dentro da instância", () => {
+    expect(barTicks(3, 2.5).map((x) => x.bar)).toEqual([3, 4, 5]);
+    const t = barTicks(3.5, 2);
+    expect(t.map((x) => x.bar)).toEqual([4, 5]);
+    expect(t[0].at).toBeCloseTo(0.25);
+    expect(t[1].at).toBeCloseTo(0.75);
     expect(barTicks(1, 0)).toEqual([]);
   });
 });

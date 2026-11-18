@@ -113,35 +113,37 @@ export type CountInClick = { time: number; accent: boolean };
  */
 export function metronomeClicks(expanded: Expanded): CountInClick[] {
   const clicks: CountInClick[] = [];
-  let blockKey = "";
-  let beatInBlock = 0;
   for (const ev of expanded.events) {
-    const key = `${ev.itemIndex}:${ev.repetition}`;
-    if (key !== blockKey) {
-      blockKey = key;
-      beatInBlock = 0;
-    }
-    const firstBeat = beatInBlock;
-    beatInBlock += ev.beats;
     const spb = secondsPerBeat(ev.bpm);
     const step = isCompound(ev.meter) ? 3 : 1;
-    for (let b = 0; b < ev.beats; b++) {
-      const beat = firstBeat + b;
-      if (beat % step !== 0) continue;
-      clicks.push({ time: ev.startSec + b * spb, accent: beat % ev.meter[0] === 0 });
+    const first = ev.blockBeat;
+    // Cliques nos tempos inteiros da grade do bloco que caem dentro do acorde (acordes de ½ tempo
+    // podem deslocar o início do acorde para fora da grade).
+    for (let k = Math.ceil(first - BEAT_EPS); k < first + ev.beats - BEAT_EPS; k++) {
+      if (k % step !== 0) continue;
+      clicks.push({ time: ev.startSec + (k - first) * spb, accent: k % ev.meter[0] === 0 });
     }
   }
   return clicks;
 }
 
-/** Um compasso de contagem no andamento e na fórmula do primeiro acorde (compostos: um clique por pulso). */
+const BEAT_EPS = 1e-6;
+
+/**
+ * Contagem no andamento e na fórmula do primeiro acorde (compostos: um clique por pulso): um compasso
+ * inteiro e, se a reprodução começa no meio do compasso (região), os tempos até lá — assim o primeiro
+ * acorde cai no tempo certo da contagem.
+ */
 export function countIn(expanded: Expanded): { seconds: number; clicks: CountInClick[] } {
   const first = expanded.events[0];
   if (!first) return { seconds: 0, clicks: [] };
   const spb = secondsPerBeat(first.bpm);
+  const [perBar] = first.meter;
   const step = isCompound(first.meter) ? 3 : 1;
-  const clicks = Array.from({ length: first.meter[0] / step }, (_, i) => ({ time: i * step * spb, accent: i === 0 }));
-  return { seconds: first.meter[0] * spb, clicks };
+  const lead = perBar + (((first.blockBeat % perBar) + perBar) % perBar);
+  const clicks: CountInClick[] = [];
+  for (let k = 0; k < lead - BEAT_EPS; k += step) clicks.push({ time: k * spb, accent: k % perBar === 0 });
+  return { seconds: lead * spb, clicks };
 }
 
 /** Programa General MIDI (0–127) do instrumento, pelo nome do banco GM. */

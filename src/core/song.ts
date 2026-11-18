@@ -40,6 +40,8 @@ export type TimedChord = {
   repetition: number;
   chordIndex: number;
   startBeat: number;
+  /** Posição (em tempos) do início do acorde dentro da passada do bloco — inclusive numa região que começa no meio. */
+  blockBeat: number;
   beats: number;
   startSec: number;
   durationSec: number;
@@ -100,7 +102,10 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
 
   for (let rep = 0; rep < repeat; rep++) {
     let beatsDone = 0;
+    let pos = 0;
     block.chords.forEach((chord, chordIndex) => {
+      const blockBeat = pos;
+      pos += chord.duration;
       if (chordIndex < from || chordIndex > to) return;
       a.events.push({
         chord,
@@ -109,6 +114,7 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
         repetition: rep,
         chordIndex,
         startBeat: a.beatAbs,
+        blockBeat,
         beats: chord.duration,
         startSec: a.sec,
         durationSec: chord.duration * spb,

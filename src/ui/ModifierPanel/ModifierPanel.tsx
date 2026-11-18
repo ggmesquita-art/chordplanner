@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getInstrumentDef } from "../../audio/instruments";
 import {
   conflictingModifier,
@@ -73,6 +73,7 @@ export function ModifierPanel() {
   const spell = useSpeller();
   const actions = useStore.getState();
   const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLElement>(null);
   const chordId = chord?.id ?? null;
 
   // Gaveta (celular): abre ao selecionar um acorde (ajuste de estado durante o render); Esc fecha.
@@ -83,7 +84,14 @@ export function ModifierPanel() {
   }
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Camada mais baixa: só fecha se nenhuma camada de cima tratou o Esc e o foco é da gaveta (ou da página).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const a = document.activeElement;
+      if (a && a !== document.body && !panel.current?.contains(a)) return;
+      e.preventDefault();
+      setOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
@@ -96,7 +104,7 @@ export function ModifierPanel() {
 
   if (!chord || !block) {
     return (
-      <section className={`modifiers empty ${open ? "open" : ""}`} aria-label="Modificadores">
+      <section ref={panel} className={`modifiers empty ${open ? "open" : ""}`} aria-label="Modificadores">
         <div className="mod-bar">
           <h2>Modificadores</h2>
           {drawerToggle}
@@ -131,7 +139,7 @@ export function ModifierPanel() {
   const statusByPc = new Map(resolved.pcs.map((pc, i) => [pc, resolved.status[i]]));
 
   return (
-    <section className={`modifiers ${open ? "open" : ""}`} aria-label="Modificadores">
+    <section ref={panel} className={`modifiers ${open ? "open" : ""}`} aria-label="Modificadores">
       <div className="mod-bar">
         <h2>
           Modificadores <span className="muted">— acorde {index + 1}:</span> <span className="accent">{resolved.symbol}</span>

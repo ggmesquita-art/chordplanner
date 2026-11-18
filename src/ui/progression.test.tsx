@@ -13,6 +13,7 @@ vi.mock("../audio/engine", () => ({
 }));
 
 import { selectBlock, useStore } from "../state/store";
+import { ModifierPanel } from "./ModifierPanel/ModifierPanel";
 import { Progression } from "./Progression/Progression";
 
 const chords = () => selectBlock(useStore.getState())!.chords;
@@ -91,7 +92,8 @@ describe("progressão", () => {
     const cards = screen.getAllByRole("listitem");
     expect(cards[0].classList.contains("crosses-bar")).toBe(false);
     expect(cards[1].classList.contains("crosses-bar")).toBe(true);
-    expect(cards[1].querySelector(".tie")?.getAttribute("title")).toBe("Atravessa a barra de compasso");
+    expect(cards[1].getAttribute("title")).toContain("Atravessa a barra de compasso");
+    expect(cards[0].getAttribute("title")).not.toContain("Atravessa");
   });
 
   describe("teclado", () => {
@@ -136,5 +138,76 @@ describe("progressão", () => {
       fireEvent.keyDown(screen.getAllByLabelText("Aumentar duração")[1], { key: "Enter" });
       expect(useStore.getState().selectedChord).toBe(chords()[0].id);
     });
+  });
+});
+
+describe("alça, teclas e camadas de Esc", () => {
+  it("a alça deixa Ctrl+Z e Espaço chegarem ao window, mas segura Delete", () => {
+    setup(2);
+    render(<Progression />);
+    const seen: string[] = [];
+    const on = (e: KeyboardEvent) => seen.push(e.key);
+    window.addEventListener("keydown", on);
+    const handle = screen.getAllByRole("slider")[0];
+    fireEvent.keyDown(handle, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(handle, { key: " " });
+    fireEvent.keyDown(handle, { key: "Delete" });
+    window.removeEventListener("keydown", on);
+    expect(seen).toEqual(["z", " "]);
+    expect(chords()).toHaveLength(2);
+    expect(handle.getAttribute("aria-valuemin")).toBe("0.5");
+  });
+
+  it("− fica desabilitado quando a duração já é o mínimo da grade", () => {
+    setup(1);
+    act(() => useStore.getState().setDuration(chords()[0].id, 1));
+    render(<Progression />);
+    expect((screen.getByLabelText("Diminuir duração") as HTMLButtonElement).disabled).toBe(true);
+    act(() => useStore.getState().setDuration(chords()[0].id, 4));
+    expect((screen.getByLabelText("Diminuir duração") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("arraste: só o card redimensionado perde o draggable; Esc global cancela; botão direito é ignorado", () => {
+    setup(2);
+    render(<Progression />);
+    const cards = screen.getAllByRole("listitem");
+    const handle = screen.getAllByRole("slider")[0];
+    handle.parentElement!.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
+    fireEvent.pointerDown(handle, { button: 2, pointerType: "mouse" });
+    expect(cards[0].getAttribute("draggable")).toBe("true");
+    fireEvent.pointerDown(handle, { button: 0, pointerType: "mouse" });
+    expect(cards[0].getAttribute("draggable")).toBe("false");
+    expect(cards[1].getAttribute("draggable")).toBe("true");
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(cards[0].getAttribute("draggable")).toBe("true");
+  });
+
+  it("desmontar no meio do arraste não deixa o estado preso", () => {
+    setup(2);
+    render(<Progression />);
+    const handle = screen.getAllByRole("slider")[0];
+    handle.parentElement!.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
+    fireEvent.pointerDown(handle, { button: 0, pointerType: "mouse" });
+    act(() => useStore.getState().removeChord(chords()[0].id));
+    for (const c of screen.getAllByRole("listitem")) expect(c.getAttribute("draggable")).toBe("true");
+  });
+
+  it("com a gaveta e o modal abertos, um Esc fecha só o modal", () => {
+    setup(2);
+    render(
+      <>
+        <Progression />
+        <ModifierPanel />
+      </>,
+    );
+    act(() => useStore.getState().selectChord(chords()[0].id));
+    expect(screen.getByLabelText("Recolher modificadores")).toBeTruthy();
+    fireEvent.click(screen.getByText(/Exportar cifra/));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Recolher modificadores")).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByLabelText("Expandir modificadores")).toBeTruthy();
   });
 });

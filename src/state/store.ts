@@ -692,6 +692,11 @@ export function sessionAtRisk(): boolean {
   return !sessionDiscarded && (!lastSessionOk || !repository.persistent) && selectDirty(useStore.getState());
 }
 
+// O escopo "Região" sem região selecionada vira "Bloco" (senão o botão fica marcado e desabilitado).
+useStore.subscribe((s) => {
+  if (s.playScope === "region" && !selectRegion(s)) useStore.setState({ playScope: "block" });
+});
+
 useStore.subscribe(() => {
   clearTimeout(saveTimer);
   if (!sessionDiscarded) saveTimer = setTimeout(flushSession, 300);

@@ -39,7 +39,7 @@ function Ruler({ start, duration, meter }: { start: number; duration: number; me
           </span>
         ))}
         {ties.map((t) => (
-          <span key={`t${t}`} className="tie" style={{ left: `${(t / duration) * 100}%` }} title="Atravessa a barra de compasso">
+          <span key={`t${t}`} className="tie" style={{ left: `${(t / duration) * 100}%` }}>
             ‿
           </span>
         ))}
@@ -74,7 +74,11 @@ function TextModal({ data, onClose }: { data: TextModalData; onClose: () => void
 
   useEffect(() => {
     copyBtn.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      close.current();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
@@ -335,9 +339,9 @@ export function Progression() {
               ref={playing ? keepVisible : undefined}
               className={`chord-card ${c.id === selectedChord ? "selected" : ""} ${playing ? "playing" : ""} ${!inScale ? (chromatic ? "chromatic" : "out") : ""} ${dragFrom === i ? "dragging" : ""} ${inRegion ? "in-region" : ""} ${crosses ? "crosses-bar" : ""}`}
               style={{ flexGrow: shown, minWidth: `${Math.max(88, shown * 26)}px` }}
-              title="Shift+clique estende a seleção (região). Alt+←/→ move o acorde"
-              draggable={!live}
-              onDragStart={() => !live && setDragFrom(i)}
+              title={`Shift+clique estende a seleção (região). Alt+←/→ move o acorde${crosses ? ". Atravessa a barra de compasso" : ""}`}
+              draggable={live?.id !== c.id}
+              onDragStart={() => live?.id !== c.id && setDragFrom(i)}
               onDragEnd={() => setDragFrom(null)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
@@ -401,7 +405,12 @@ export function Progression() {
               </div>
               <div className="chord-roman">{roman}</div>
               <div className="chord-bottom" onClick={(e) => e.stopPropagation()}>
-                <button className="icon-btn tiny" onClick={() => actions.setDuration(c.id, stepDuration(c.duration, -1, unit))} aria-label="Diminuir duração">
+                <button
+                  className="icon-btn tiny"
+                  disabled={stepDuration(c.duration, -1, unit) === c.duration}
+                  onClick={() => actions.setDuration(c.id, stepDuration(c.duration, -1, unit))}
+                  aria-label="Diminuir duração"
+                >
                   −
                 </button>
                 <span className="mono" title="Duração em tempos">

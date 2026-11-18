@@ -263,4 +263,18 @@ describe("store", () => {
     useStore.getState().setBlockProps(id, { color: "url(x)" });
     expect(selectBlock(useStore.getState())!.color).toBe("#ff6b81");
   });
+
+  it("escopo 'Região' volta a 'Bloco' quando a região deixa de existir", () => {
+    const st = useStore.getState();
+    st.newSong();
+    st.setTonic(0);
+    st.addChord(7, "maj");
+    const ids = selectBlock(useStore.getState())!.chords.map((c) => c.id);
+    useStore.getState().selectChord(ids[0]);
+    useStore.getState().setRegionEnd(ids[1]);
+    useStore.getState().setPlayScope("region");
+    expect(useStore.getState().playScope).toBe("region");
+    useStore.getState().selectChord(ids[1]);
+    expect(useStore.getState().playScope).toBe("block");
+  });
 });
