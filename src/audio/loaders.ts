@@ -12,6 +12,9 @@ export { pickEviction };
 
 type RawVoice = {
   triggerAttackRelease: (notes: string[], duration: number, time?: number, velocity?: number) => unknown;
+  /** Ataque sem duração definida (teclado MIDI): a nota soa até `triggerRelease`. */
+  triggerAttack: (notes: string[], time?: number, velocity?: number) => unknown;
+  triggerRelease: (notes: string[], time?: number) => unknown;
   releaseAll: (time?: number) => unknown;
 };
 
@@ -50,13 +53,14 @@ export function limiterInput(): Tone.ToneAudioNode {
 
 // ——— Instrumentos —————————————————————————————————————————————————————
 
+const shifted = (notes: string[], shift?: number) => (shift ? notes.map((n) => Tone.Frequency(n).transpose(shift).toNote()) : notes);
+
 /** Soma várias vozes (camadas), opcionalmente transpostas por semitons. */
 function layer(...voices: [RawVoice, number?][]): RawVoice {
   return {
-    triggerAttackRelease: (notes, dur, time, vel) =>
-      voices.forEach(([v, shift]) =>
-        v.triggerAttackRelease(shift ? notes.map((n) => Tone.Frequency(n).transpose(shift).toNote()) : notes, dur, time, vel),
-      ),
+    triggerAttackRelease: (notes, dur, time, vel) => voices.forEach(([v, shift]) => v.triggerAttackRelease(shifted(notes, shift), dur, time, vel)),
+    triggerAttack: (notes, time, vel) => voices.forEach(([v, shift]) => v.triggerAttack(shifted(notes, shift), time, vel)),
+    triggerRelease: (notes, time) => voices.forEach(([v, shift]) => v.triggerRelease(shifted(notes, shift), time)),
     releaseAll: (time) => voices.forEach(([v]) => v.releaseAll(time)),
   };
 }
@@ -79,6 +83,8 @@ function createSynth(preset: SynthPreset): Voice & { dispose: () => void } {
   const voice = buildSynth(preset, fx);
   return {
     triggerAttackRelease: (...args) => voice.triggerAttackRelease(...args),
+    triggerAttack: (...args) => voice.triggerAttack(...args),
+    triggerRelease: (...args) => voice.triggerRelease(...args),
     releaseAll: (time) => voice.releaseAll(time),
     dispose: () => {
       voice.releaseAll();
@@ -334,13 +340,31 @@ function createSmplr(src: SmplrSource, onLoadProgress: (p: { loaded: number; tot
 }
 
 function smplrVoice(inst: SmplrInstrument): Voice {
+  const vel = (v: number) => Math.max(1, Math.round(v * 127));
+  // Notas sem duração (teclado MIDI): o smplr devolve a função que as solta.
+  const held = new Map<number, (time?: number) => void>();
   return {
     triggerAttackRelease: (notes, duration, time, velocity = 0.8) => {
+      for (const n of notes) inst.start({ note: Tone.Frequency(n).toMidi(), velocity: vel(velocity), time, duration });
+    },
+    triggerAttack: (notes, time, velocity = 0.8) => {
       for (const n of notes) {
-        inst.start({ note: Tone.Frequency(n).toMidi(), velocity: Math.max(1, Math.round(velocity * 127)), time, duration });
+        const midi = Tone.Frequency(n).toMidi();
+        held.get(midi)?.(time);
+        held.set(midi, inst.start({ note: midi, velocity: vel(velocity), time }));
       }
     },
-    releaseAll: () => inst.stop(),
+    triggerRelease: (notes, time) => {
+      for (const n of notes) {
+        const midi = Tone.Frequency(n).toMidi();
+        held.get(midi)?.(time);
+        held.delete(midi);
+      }
+    },
+    releaseAll: () => {
+      held.clear();
+      inst.stop();
+    },
   };
 }
 

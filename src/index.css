@@ -2012,3 +2012,38 @@ section {
     gap: 4px;
   }
 }
+
+/* ——— Teclado MIDI ——— */
+.live-chord {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.live-chord b {
+  font-size: 15px;
+}
+.live-chord.in {
+  border-color: color-mix(in srgb, var(--ok) 60%, var(--line));
+}
+.live-chord.chromatic {
+  border-color: color-mix(in srgb, var(--tension) 60%, var(--line));
+}
+.live-chord.out {
+  border-color: color-mix(in srgb, var(--bad) 60%, var(--line));
+}
+.live-rec {
+  color: var(--bad);
+  font-size: 11px;
+  font-weight: 700;
+}
+.slice.live path {
+  stroke: var(--ok);
+  stroke-width: 5;
+  filter: brightness(1.2);
+}

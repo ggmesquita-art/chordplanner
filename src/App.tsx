@@ -8,6 +8,8 @@ import { ModifierPanel } from "./ui/ModifierPanel/ModifierPanel";
 import { SharedLink } from "./ui/SharedLink";
 import { Practice } from "./ui/Practice/Practice";
 import { useTheme } from "./ui/useTheme";
+import { LiveChordBadge } from "./ui/LiveChord";
+import { useMidiInput } from "./ui/useMidiInput";
 
 function useShortcuts() {
   useEffect(() => {
@@ -33,6 +35,7 @@ function useShortcuts() {
 export default function App() {
   useShortcuts();
   useMidiSync();
+  useMidiInput();
   useSessionGuard();
   useTheme();
   const soundOnClick = useStore((s) => s.soundOnClick);
@@ -52,6 +55,7 @@ export default function App() {
         <section className="wheel-panel" aria-label="Roda de acordes">
           <div className="section-head">
             <h2>Roda de acordes</h2>
+            <LiveChordBadge />
             <div className="spacer" />
             <button className="btn small" onClick={() => setPracticeOpen(true)}>
               🎧 Prática

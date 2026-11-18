@@ -4,14 +4,21 @@ import { useStore } from "../../state/store";
 import { currentInstrument, useMidiState } from "../hooks";
 import { usePopover } from "../usePopover";
 
-/** Saída MIDI para DAW/plugins (ex.: Ableton via IAC Driver). */
+/** Saída MIDI para DAW/plugins (ex.: Ableton via IAC Driver) e entrada de teclado MIDI. */
 export function MidiPanel() {
   const midi = useStore((s) => s.midi);
   const setMidi = useStore((s) => s.setMidi);
-  const { status, ports } = useMidiState();
+  const { status, ports, inputs } = useMidiState();
   const { open, setOpen, ref } = usePopover();
   const selected = ports.find((p) => p.id === midi.outputId) ?? ports[0];
   const on = midi.enabled && status === "ready" && !!selected;
+  const inputOn = midi.inputEnabled && status === "ready" && inputs.length > 0;
+  const inputName = midi.inputId ? inputs.find((i) => i.id === midi.inputId)?.name : null;
+
+  const enableInput = async (v: boolean) => {
+    if (v) await initMidi();
+    setMidi({ inputEnabled: v });
+  };
 
   const enable = async (v: boolean) => {
     if (v) await initMidi();
@@ -20,11 +27,49 @@ export function MidiPanel() {
 
   return (
     <div className="picker" ref={ref}>
-      <button className={`toggle ${on ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} title="Saída MIDI para o seu DAW">
-        🎛 MIDI{on ? ` · ${selected.name}` : ""}
+      <button className={`toggle ${on || inputOn ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} title="Teclado MIDI (entrada) e saída MIDI para o seu DAW">
+        🎛 MIDI{inputOn ? " 🎹" : ""}
+        {on ? ` · ${selected.name}` : ""}
       </button>
       {open && (
         <div className="popover midi-pop">
+          {status !== "unsupported" && (
+            <>
+              <div className="group-title">Teclado MIDI (entrada)</div>
+              <div className="midi-body">
+                <label className="check">
+                  <input type="checkbox" checked={midi.inputEnabled} onChange={(e) => void enableInput(e.target.checked)} />
+                  Receber de um teclado MIDI
+                </label>
+                {midi.inputEnabled && status === "ready" && (
+                  <>
+                    <label className="field">
+                      Teclado
+                      <select value={midi.inputId ?? ""} onChange={(e) => setMidi({ inputId: e.target.value || null })} aria-label="Porta de entrada MIDI">
+                        <option value="">Todos{inputs.length ? ` (${inputs.length})` : ""}</option>
+                        {inputs.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                        {midi.inputId && !inputName && <option value={midi.inputId}>(desconectado)</option>}
+                      </select>
+                    </label>
+                    {!inputs.length && <p className="warn small">Nenhum teclado encontrado. Conecte o teclado (USB ou Bluetooth MIDI) — ele aparece aqui sozinho.</p>}
+                    <label className="check" title="Toca as notas recebidas com o instrumento do bloco atual (o pedal de sustentação funciona)">
+                      <input type="checkbox" checked={midi.inputThru} onChange={(e) => setMidi({ inputThru: e.target.checked })} />
+                      Ouvir com o instrumento atual
+                    </label>
+                    <label className="check" title="Segure o acorde e solte: ele entra depois do acorde selecionado, como um clique na roda">
+                      <input type="checkbox" checked={midi.inputRecord} onChange={(e) => setMidi({ inputRecord: e.target.checked })} />
+                      Inserir na progressão ao soltar as teclas
+                    </label>
+                    <p className="muted small">O acorde tocado aparece ao lado de “Roda de acordes” e acende na roda. No navegador, clique uma vez na página para liberar o som.</p>
+                  </>
+                )}
+              </div>
+            </>
+          )}
           <div className="group-title">Saída MIDI</div>
           {status === "unsupported" ? (
             <p className="pad-x warn">

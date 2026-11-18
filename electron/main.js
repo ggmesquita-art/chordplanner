@@ -133,8 +133,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
-      // O modo de espelhamento toca sem gesto do usuário (janela escondida).
-      autoplayPolicy: mirrorMode ? "no-user-gesture-required" : "user-gesture-required",
+      // App instalado: o som sai sem precisar de clique antes (teclado MIDI toca logo ao abrir).
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
   if (!mirrorMode) win.once("ready-to-show", () => win.show());

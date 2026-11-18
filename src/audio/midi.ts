@@ -1,5 +1,6 @@
 // Saída MIDI (Web MIDI API): envia as notas para um DAW/plugin — ex.: Ableton
 // recebendo pelo IAC Driver do macOS. Funciona no Chrome/Edge/Firefox (não no Safari).
+// A entrada (teclado MIDI) usa o mesmo acesso: ver midiInput.ts.
 
 export type MidiSettings = {
   enabled: boolean;
@@ -10,9 +11,27 @@ export type MidiSettings = {
   latencyMs: number;
   /** Silencia o som do navegador enquanto a saída MIDI está ativa. */
   muteBrowser: boolean;
+  /** Recebe notas de um teclado MIDI (reconhece o acorde tocado). */
+  inputEnabled: boolean;
+  /** Porta de entrada; null = todas. */
+  inputId: string | null;
+  /** Toca as notas recebidas com o instrumento atual. */
+  inputThru: boolean;
+  /** Ao soltar as teclas, insere o acorde reconhecido na progressão. */
+  inputRecord: boolean;
 };
 
-export const DEFAULT_MIDI: MidiSettings = { enabled: false, outputId: null, channel: 1, latencyMs: 0, muteBrowser: true };
+export const DEFAULT_MIDI: MidiSettings = {
+  enabled: false,
+  outputId: null,
+  channel: 1,
+  latencyMs: 0,
+  muteBrowser: true,
+  inputEnabled: false,
+  inputId: null,
+  inputThru: true,
+  inputRecord: false,
+};
 
 export type MidiPort = { id: string; name: string };
 
@@ -31,14 +50,15 @@ export function subscribeMidi(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
-let snapshot: { status: MidiStatus; ports: MidiPort[] } = { status, ports: [] };
+let snapshot: { status: MidiStatus; ports: MidiPort[]; inputs: MidiPort[] } = { status, ports: [], inputs: [] };
 /** Estado para `useSyncExternalStore` (referência estável entre mudanças). */
 export function midiSnapshot() {
   return snapshot;
 }
 function refresh() {
   const ports = access ? [...access.outputs.values()].map((o) => ({ id: o.id, name: o.name ?? o.id })) : [];
-  snapshot = { status, ports };
+  const inputs = access?.inputs ? [...access.inputs.values()].map((i) => ({ id: i.id, name: i.name ?? i.id })) : [];
+  snapshot = { status, ports, inputs };
   notify();
 }
 
@@ -63,10 +83,13 @@ export async function initMidi(): Promise<boolean> {
   return !!access;
 }
 
+/** Acesso MIDI já concedido (null antes de initMidi). */
+export const midiAccess = (): MIDIAccess | null => access;
+
 export function configureMidi(next: MidiSettings) {
   const was = output();
   settings = next;
-  if (next.enabled && !access && status === "idle") void initMidi();
+  if ((next.enabled || next.inputEnabled) && !access && status === "idle") void initMidi();
   // Ligado → desligado: panic final na porta que estava em uso (as notas ativas ficariam presas).
   if (was && !midiActive()) {
     sendPanic(was);
@@ -86,6 +109,12 @@ function output(): MIDIOutput | null {
 }
 
 export const midiActive = () => output() !== null;
+/** Nome da porta de saída em uso (null se a saída está desligada). Portas virtuais como o IAC Driver
+ *  aparecem também como entrada com o mesmo nome: a entrada as ignora para não realimentar. */
+export const activeOutputName = (): string | null => {
+  const out = output();
+  return out ? (out.name ?? out.id) : null;
+};
 export const midiMutesBrowser = () => midiActive() && settings.muteBrowser;
 export const midiChannel = () => settings.channel;
 

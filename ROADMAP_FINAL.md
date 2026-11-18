@@ -7,13 +7,14 @@
 
 - **MVP, v1, v2 e v3: concluídos.** Todos os itens das Etapas 1 a 5 abaixo estão feitos.
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
-- **Saúde:** typecheck, lint e build limpos; 389 testes passando.
+- **Saúde:** typecheck, lint e build limpos; 431 testes passando.
 
 ### Entregue depois do roadmap (18/11/2026)
 
 - Layout em tela cheia: topo fixo ou automático (faixa fina que abre ao passar o mouse) e painel inferior completo ou compacto, sobreposto à roda, acompanhando a reprodução.
 - Exportação para DAW e partitura num menu único: MIDI com nomes dos acordes, MusicXML (valida no XSD 4.0), ABC e ChordPro.
 - App de desktop para macOS (Electron) com todos os samples embutidos, offline desde a instalação, Web MIDI liberado.
+- Teclado MIDI: reconhece o acorde tocado (nome, grau, destaque na roda), toca com o instrumento atual (com pedal) e grava a progressão ao soltar as teclas.
 - Cache de samples só guarda respostas válidas (antes um 503 passageiro do servidor ficava guardado para sempre e a nota emudecia).
 
 ### Entregue na rodada anterior

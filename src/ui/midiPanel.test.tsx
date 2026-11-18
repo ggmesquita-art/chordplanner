@@ -18,6 +18,9 @@ vi.mock("../audio/engine", () => {
     subscribeStatus: () => () => {},
     instrumentStatus: () => "ready",
     instrumentProgress: () => null,
+    liveNoteOn: vi.fn(),
+    liveNoteOff: vi.fn(),
+    liveAllOff: vi.fn(),
     disposeInstrument: vi.fn(),
   };
 });
@@ -38,7 +41,7 @@ async function load() {
   };
   const { act, fireEvent, screen } = rtl;
   rtl.render(<Host />);
-  await act(async () => fireEvent.click(screen.getByTitle("Saída MIDI para o seu DAW")));
+  await act(async () => fireEvent.click(screen.getByTitle("Teclado MIDI (entrada) e saída MIDI para o seu DAW")));
   const enable = () => act(async () => fireEvent.click(screen.getByLabelText("Enviar notas por MIDI")));
   return { ...rtl, useStore, enable };
 }

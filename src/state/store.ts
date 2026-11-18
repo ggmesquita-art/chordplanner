@@ -127,7 +127,8 @@ type Actions = {
   setMidi: (patch: Partial<MidiSettings>) => void;
 
   /** `modifiers` já entram no acorde criado (um único passo de desfazer). */
-  addChord: (root: PitchClass, quality: QualityId, modifiers?: Modifier[]) => Chord | null;
+  /** `bass`: baixo invertido/slash (ex.: acorde tocado no teclado MIDI). */
+  addChord: (root: PitchClass, quality: QualityId, modifiers?: Modifier[], bass?: PitchClass) => Chord | null;
   selectChord: (id: string | null) => void;
   removeChord: (id: string) => void;
   duplicateChord: (id: string) => void;
@@ -210,8 +211,9 @@ function initialState(): State {
     dock,
     regionEnd: null,
     editEnding: false,
-    // A permissão de MIDI é pedida de novo a cada sessão: começa desligado.
-    midi: { ...DEFAULT_MIDI, ...midi, enabled: false },
+    // Saída MIDI começa desligada a cada sessão. A entrada (teclado) continua ligada se estava: a permissão já foi
+    // concedida num gesto antes; mas gravar na progressão volta desligado, para tocar não editar a música sem querer.
+    midi: { ...DEFAULT_MIDI, ...midi, enabled: false, inputRecord: false },
     songId,
     songName,
     // Sessão antiga sem hash: considera o estado atual como "salvo" para não acusar alteração falsa.
@@ -429,12 +431,13 @@ export const useStore = create<Store>()((set, get) => {
     setFollowPlayback: (followPlayback) => set({ followPlayback }),
     setMidi: (patch) => set({ midi: { ...get().midi, ...patch } }),
 
-    addChord: (root, quality, modifiers) => {
+    addChord: (root, quality, modifiers, bass) => {
       const s = get();
       const block = selectBlock(s);
       if (!block) return null;
       const chord = makeChord(root, quality, (block.meter ?? s.song.meter)[0]);
       if (modifiers?.length) chord.modifiers = structuredClone(modifiers);
+      if (bass !== undefined && bass !== root) chord.bass = bass;
       commit(
         (song, st) => {
           const list = editList(song, st, true)!;

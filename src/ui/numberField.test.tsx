@@ -10,6 +10,9 @@ vi.mock("../audio/engine", () => ({
   subscribeStatus: () => () => {},
   instrumentStatus: () => "ready",
   instrumentProgress: () => null,
+  liveNoteOn: vi.fn(),
+  liveNoteOff: vi.fn(),
+  liveAllOff: vi.fn(),
 }));
 
 import { selectBlock, useStore } from "../state/store";

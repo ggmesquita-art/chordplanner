@@ -83,6 +83,40 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
   await m.play(expanded, opts);
 }
 
+// ——— Teclado MIDI ao vivo: síncrono quando o player já carregou (latência mínima) ———
+
+/** Teclas apertadas antes de o motor carregar: só atacam se ainda estiverem apertadas quando ele chegar. */
+const pendingLive = new Map<number, { velocity: number; instrumentId: string }>();
+
+export function liveNoteOn(note: number, velocity: number, instrumentId: string) {
+  if (player) {
+    player.liveNoteOn(note, velocity, instrumentId);
+    return;
+  }
+  primeAudioContext();
+  pendingLive.set(note, { velocity, instrumentId });
+  void loadPlayer().then(
+    async (m) => {
+      await m.unlock().catch(() => {});
+      const p = pendingLive.get(note);
+      if (!p) return;
+      pendingLive.delete(note);
+      m.liveNoteOn(note, p.velocity, p.instrumentId);
+    },
+    () => pendingLive.delete(note),
+  );
+}
+
+export function liveNoteOff(note: number) {
+  pendingLive.delete(note);
+  player?.liveNoteOff(note);
+}
+
+export function liveAllOff() {
+  pendingLive.clear();
+  player?.liveAllOff();
+}
+
 /** Síncrona: sem player carregado não há nada tocando. */
 export function stop() {
   generation++;

@@ -9,6 +9,7 @@ import { selectEditChords, useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
 import { sharedPitchClasses } from "./shared";
+import { useLiveChord } from "../useMidiInput";
 
 const SIZE = 560;
 const C = SIZE / 2;
@@ -145,6 +146,8 @@ export function ChordWheel() {
 
   // Em modo casa 2, seleção e "acorde anterior" vêm da lista em edição.
   const selected = editChords.find((c) => c.id === selectedChordId) ?? null;
+  // Acorde segurado no teclado MIDI (destacado na roda).
+  const live = useLiveChord().chord;
   const playing = useMemo(() => {
     if (!playhead) return null;
     const item = song.arrangement[playhead.itemIndex];
@@ -223,6 +226,7 @@ export function ChordWheel() {
                 const isTonic = ctx !== null && root === ctx.tonic && ctx.degrees[0]?.primary === ring.quality;
                 const isSel = selected && selected.root === root && selected.quality === ring.quality;
                 const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
+                const isLive = live && live.root === root && live.quality === ring.quality;
                 const sym = chordSymbol(makeChord(root, ring.quality), spell);
                 const [lx, ly] = pt((ring.r0 + ring.r1) / 2 + (roman ? 7 : 0), angle);
                 const [rx, ry] = pt((ring.r0 + ring.r1) / 2 - 13, angle);
@@ -230,7 +234,7 @@ export function ChordWheel() {
                   <g
                     key={`${ri}-${pos}`}
                     ref={(el) => void (el ? refs.current.set(`${ri}-${pos}`, el) : refs.current.delete(`${ri}-${pos}`))}
-                    className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""}`}
+                    className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""} ${isLive ? "live" : ""}`}
                     tabIndex={0}
                     role="button"
                     aria-disabled={!can}

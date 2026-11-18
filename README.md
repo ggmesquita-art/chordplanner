@@ -28,6 +28,7 @@ npm run app:dist      # gera release/ChordPlanner-<versão>-arm64.dmg
 - Instalação das dependências: o binário do Electron vem do script de instalação do pacote. Se o npm bloquear scripts, rode `node node_modules/electron/install.js`.
 
 - `src/core/` — teoria musical pura e testada (escalas, acordes, diatônicos, modificadores, voicings, análise funcional, tempo, arranjo, braço de violão, prática).
+- Teclado MIDI (entrada): painel 🎛 MIDI → "Receber de um teclado MIDI". O acorde segurado aparece ao lado de "Roda de acordes" e acende na roda (`src/core/recognize.ts`); "Ouvir" toca as notas com o instrumento atual (pedal incluso); "Inserir na progressão" grava o acorde ao soltar as teclas. Chrome, Edge, Firefox e o app de desktop (o Safari não tem Web MIDI). A porta usada como saída (IAC Driver) é ignorada como entrada para não realimentar.
 - `src/audio/` — motor de áudio. `engine.ts` é uma fachada leve; Tone.js e smplr (`player.ts`, `loaders.ts`) só são baixados no primeiro som. Samples via smplr: SplendidGrandPiano, E-Pianos, VCSL, Smolken e MusyngKite (FluidR3 como plano B).
 - `src/state/` — store Zustand com desfazer/refazer e persistência.
 - `src/export/` — MIDI (`.mid`, com nomes dos acordes), MusicXML, ABC, ChordPro, cifra em texto, arquivo JSON reimportável (com validação de conteúdo externo) e link de compartilhamento (`#s=…`, música comprimida no fragmento da URL). Partituras usam `src/core/notation.ts` (compassos, ligaduras, armadura, grafia).

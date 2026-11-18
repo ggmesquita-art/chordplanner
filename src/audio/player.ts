@@ -176,6 +176,44 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
   transport.start("+0.05");
 }
 
+// ——— Teclado MIDI ao vivo ————————————————————————————————————————————————
+
+/** Notas soando por causa do teclado: voz que atacou (o instrumento pode mudar no meio), nota efetivamente tocada
+ *  (transposta para a tessitura) e canal da saída MIDI, se repassada. */
+const live = new Map<number, { voice: ReturnType<typeof ensureInstrument>["voice"] | null; played: string; midiOut: number | null }>();
+
+/** Ataca uma nota tocada no teclado MIDI com o instrumento atual (e/ou repassa à saída MIDI, se ativa). */
+export function liveNoteOn(note: number, velocity: number, instrumentId: string) {
+  liveNoteOff(note);
+  let midiOut: number | null = null;
+  if (midiActive()) {
+    midiOut = midiChannel();
+    noteOn(midiOut, note, velocity);
+  }
+  let voice = null;
+  // Fora da tessitura do instrumento, transpõe por oitavas (como na reprodução).
+  const played = toNote(fitToRange([note], getInstrumentDef(instrumentId).range).notes[0] ?? note);
+  if (!midiMutesBrowser()) {
+    voice = ensureInstrument(instrumentId).voice;
+    pinPreview(instrumentId);
+    // immediate(): sem a antecipação (lookAhead) do Tone, que atrasaria cada tecla em ~100 ms.
+    voice.triggerAttack([played], Tone.immediate(), Math.max(0.05, velocity));
+  }
+  live.set(note, { voice, played, midiOut });
+}
+
+export function liveNoteOff(note: number) {
+  const entry = live.get(note);
+  if (!entry) return;
+  live.delete(note);
+  if (entry.midiOut !== null) noteOff(entry.midiOut, note);
+  entry.voice?.triggerRelease([entry.played], Tone.immediate());
+}
+
+export function liveAllOff() {
+  for (const note of [...live.keys()]) liveNoteOff(note);
+}
+
 export function stop() {
   currentOnEnd = null;
   pinPlaying([]);
