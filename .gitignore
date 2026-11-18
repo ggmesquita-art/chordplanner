@@ -26,3 +26,7 @@ dist-ssr
 # Gerados / backups locais
 graphify-out/
 *.bak.*
+
+# App de desktop: instaladores e samples espelhados
+release/
+desktop-samples/

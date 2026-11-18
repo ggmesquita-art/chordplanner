@@ -90,22 +90,25 @@ export function ExportMenu() {
             <b>Arquivo (.json)</b>
             <span className="muted small">Para guardar ou enviar; abre em “Importar arquivo…”</span>
           </button>
-          <button
-            className="export-item"
-            onClick={run(
-              () =>
-                void shareUrl().then((url) =>
-                  onText({
-                    title: "Link de compartilhamento",
-                    text: url,
-                    hint: url.length > 8000 ? "Link longo: alguns aplicativos podem cortá-lo. Para músicas grandes, prefira exportar o JSON." : undefined,
-                  }),
-                ),
-            )}
-          >
-            <b>🔗 Link</b>
-            <span className="muted small">A música inteira dentro do endereço</span>
-          </button>
+          {/* No app de desktop o endereço é app://, que não abre em outro computador. */}
+          {location.protocol !== "app:" && (
+            <button
+              className="export-item"
+              onClick={run(
+                () =>
+                  void shareUrl().then((url) =>
+                    onText({
+                      title: "Link de compartilhamento",
+                      text: url,
+                      hint: url.length > 8000 ? "Link longo: alguns aplicativos podem cortá-lo. Para músicas grandes, prefira exportar o JSON." : undefined,
+                    }),
+                  ),
+              )}
+            >
+              <b>🔗 Link</b>
+              <span className="muted small">A música inteira dentro do endereço</span>
+            </button>
+          )}
         </div>
       )}
       {modal && <TextModal data={modal} onClose={() => (setModal(null), trigger.current?.focus())} />}

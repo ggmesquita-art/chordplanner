@@ -7,9 +7,16 @@
 
 - **MVP, v1, v2 e v3: concluídos.** Todos os itens das Etapas 1 a 5 abaixo estão feitos.
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
-- **Saúde:** typecheck, lint e build limpos; 357 testes passando; sem vulnerabilidades em `npm audit`.
+- **Saúde:** typecheck, lint e build limpos; 389 testes passando.
 
-### Entregue na última rodada
+### Entregue depois do roadmap (18/11/2026)
+
+- Layout em tela cheia: topo fixo ou automático (faixa fina que abre ao passar o mouse) e painel inferior completo ou compacto, sobreposto à roda, acompanhando a reprodução.
+- Exportação para DAW e partitura num menu único: MIDI com nomes dos acordes, MusicXML (valida no XSD 4.0), ABC e ChordPro.
+- App de desktop para macOS (Electron) com todos os samples embutidos, offline desde a instalação, Web MIDI liberado.
+- Cache de samples só guarda respostas válidas (antes um 503 passageiro do servidor ficava guardado para sempre e a nota emudecia).
+
+### Entregue na rodada anterior
 
 - Desfazer/refazer restaura tônica e escala junto com a música.
 - Campo de BPM sem limite a cada tecla; BPM e canal MIDI por bloco com limites.
@@ -27,7 +34,7 @@
 - [x] CI rodando `tsc -b`, `oxlint`, `vitest run` e `vite build` a cada push (`.github/workflows/ci.yml`; começa a valer quando o repositório tiver um remoto no GitHub).
 - [x] Scripts de setup de orquestração movidos para `scripts/`.
 - [ ] Escolher a licença do projeto e conferir a licença de redistribuição dos samples (§11.4).
-- [ ] Definir onde o app será publicado e documentar o deploy no `README.md`.
+- [ ] Definir onde o app será publicado e documentar o deploy no `README.md`. (App de desktop para macOS já gera `.dmg`; falta decidir assinatura/notarização e a publicação web.)
 
 ## Etapa 1 — Fechar a v1
 

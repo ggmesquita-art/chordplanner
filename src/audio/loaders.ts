@@ -3,7 +3,8 @@
 
 import "./toneContext";
 import * as Tone from "tone";
-import { CacheStorage, ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
+import { okOnlyCache, type SampleStorage } from "./sampleCache";
+import { ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
 import { getInstrumentDef, type InstrumentDef, type SmplrSource, type SynthPreset } from "./instruments";
 import { clearProgress, clearStatus, pickEviction, reportProgress, setStatus } from "./status";
 
@@ -299,13 +300,17 @@ function sink(): AudioNode {
   return smplrSink;
 }
 
-let storage: ReturnType<typeof CacheStorage> | undefined;
-/** Cache API (só em contexto seguro: https ou localhost) evita baixar os samples de novo. */
-function sampleStorage() {
-  if (storage === undefined && typeof window !== "undefined" && window.isSecureContext && "caches" in window) {
-    storage = CacheStorage("chordplanner-samples");
+let storage: SampleStorage | null | undefined;
+/**
+ * Cache API (só em contexto seguro: https ou localhost) evita baixar os samples de novo. No app de
+ * desktop (app://) o processo principal já serve os samples do disco: sem cópia duplicada aqui.
+ */
+function sampleStorage(): SampleStorage | undefined {
+  if (storage === undefined) {
+    const usable = typeof window !== "undefined" && window.isSecureContext && "caches" in window && location.protocol !== "app:";
+    storage = usable ? okOnlyCache("chordplanner-samples") : null;
   }
-  return storage;
+  return storage ?? undefined;
 }
 
 function createSmplr(src: SmplrSource, onLoadProgress: (p: { loaded: number; total: number }) => void): SmplrInstrument {

@@ -15,4 +15,10 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-void registerServiceWorker();
+// No app de desktop (esquema app://) o processo principal já serve tudo do disco: sem service worker.
+const desktop = location.protocol === "app:";
+void registerServiceWorker({ enabled: import.meta.env.PROD && !desktop });
+
+if (desktop && new URLSearchParams(location.search).has("mirror-samples")) {
+  void import("./desktop/mirrorSamples").then((m) => m.mirrorAllSamples());
+}
