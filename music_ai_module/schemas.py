@@ -5,7 +5,7 @@ Pydantic v2 strict schemas and domain models for music_ai_module.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -211,6 +211,34 @@ class GenerationResult(BaseModel):
     generation_time_sec: float = 0.0
     vram_used_mb: float = 0.0
     model_used: str = "expressive_medium"
+
+
+class ModelDownloadRequest(BaseModel):
+    """
+    Request payload to download MIDI-GPT weights from Hugging Face.
+    """
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    model_name: Literal[
+        "expressive_medium", "prism_medium", "yellow_medium", "yellow_small"
+    ] = "expressive_medium"
+    hf_token: Optional[str] = None
+    save_token: bool = False
+
+
+class ModelDownloadResponse(BaseModel):
+    """
+    Structured response for model weight download attempts.
+    """
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    success: bool
+    model_name: str
+    message: str
+    path: Optional[str] = None
+    already_present: bool = False
+    auth_required: bool = False
+    repo_url: str = "https://huggingface.co/Metacreation/MIDI-GPT"
 
 
 CAMELOT_TO_KEY: Dict[CamelotKey, Tuple[int, str, str]] = {

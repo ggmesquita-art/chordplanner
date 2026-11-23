@@ -4,18 +4,24 @@ import {
   AI_GENRES,
   AI_MODELS,
   AI_MODEL_LABELS,
+  AIServerError,
   DEFAULT_AI_SERVER_URL,
   buildGenerationRequest,
   createMusicAIClient,
   generationResultToBlockPatch,
+  getDesktopAIBridge,
+  installedModelNames,
   planToChords,
   type AIGenModelName,
+  type AIGenerationOptions,
   type AIHealthStatus,
+  type DesktopAIServerStatus,
   type GenerationMode,
   type GenerationResult,
   type TheoreticalPlan,
   type TrackRole,
 } from "../../ai/client";
+import { buildOfflineSkillPlan, generateOfflineSkillPatch } from "../../ai/skillFallback";
 import { camelotNeighbors, fromCamelotCode, toCamelotCode, type CamelotCode } from "../../core/camelot";
 import { isRest } from "../../core/chords";
 import { scaleContext } from "../../core/diatonic";
@@ -108,8 +114,14 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
   const [health, setHealth] = useState<AIHealthStatus | null>(null);
   const [healthState, setHealthState] = useState<"checking" | "online" | "offline">("checking");
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [serverAction, setServerAction] = useState<"starting" | "stopping" | null>(null);
+  const [desktopStatus, setDesktopStatus] = useState<DesktopAIServerStatus | null>(null);
 
-  const [loadingAction, setLoadingAction] = useState<"plan" | "generate" | null>(null);
+  const [hfToken, setHfToken] = useState<string>("");
+  const [saveHfToken, setSaveHfToken] = useState<boolean>(false);
+  const [downloadAuthRequired, setDownloadAuthRequired] = useState<boolean>(false);
+
+  const [loadingAction, setLoadingAction] = useState<"plan" | "generate" | "download" | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [plan, setPlan] = useState<TheoreticalPlan | null>(null);
@@ -118,11 +130,15 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
 
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const mountedRef = useRef(true);
+  const healthSeqRef = useRef(0);
+  const skillSeedRef = useRef(1);
   useEffect(() => {
     onCloseRef.current = onClose;
   });
 
   useEffect(() => {
+    mountedRef.current = true;
     closeBtnRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
@@ -130,41 +146,215 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
       onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      mountedRef.current = false;
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    createMusicAIClient(serverUrl, fetchImpl)
-      .checkHealth()
-      .then((h) => {
-        if (cancelled) return;
+    const seq = ++healthSeqRef.current;
+    const isCurrent = () => !cancelled && mountedRef.current && healthSeqRef.current === seq;
+    const client = createMusicAIClient(serverUrl, fetchImpl);
+    const bridge = getDesktopAIBridge();
+
+    const init = async () => {
+      try {
+        const h = await client.checkHealth();
+        if (!isCurrent()) return;
         setHealth(h);
         setHealthState("online");
         setHealthError(null);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setHealth(null);
-        setHealthState("offline");
-        setHealthError(err instanceof Error ? err.message : "Servidor IA offline");
-      });
+        if (bridge) {
+          bridge
+            .getServerStatus()
+            .then((s) => {
+              if (isCurrent()) setDesktopStatus(s);
+            })
+            .catch(() => {});
+        }
+      } catch (err: unknown) {
+        if (!isCurrent()) return;
+        if (bridge) {
+          setServerAction("starting");
+          setHealthError(null);
+          try {
+            const startRes = await bridge.startServer();
+            if (!isCurrent()) return;
+            setDesktopStatus(startRes);
+            if (startRes.ok) {
+              try {
+                const h = await client.checkHealth();
+                if (!isCurrent()) return;
+                setHealth(h);
+                setHealthState("online");
+                setHealthError(null);
+              } catch (healthErr: unknown) {
+                if (!isCurrent()) return;
+                setHealth(null);
+                setHealthState("offline");
+                setHealthError(
+                  healthErr instanceof Error
+                    ? healthErr.message
+                    : startRes.message || "Servidor IA offline",
+                );
+              }
+            } else {
+              setHealth(null);
+              setHealthState("offline");
+              setHealthError(startRes.message || "Não foi possível iniciar o servidor IA.");
+            }
+          } catch (startErr: unknown) {
+            if (!isCurrent()) return;
+            setHealth(null);
+            setHealthState("offline");
+            setHealthError(
+              startErr instanceof Error ? startErr.message : "Falha ao iniciar servidor IA.",
+            );
+          } finally {
+            if (isCurrent()) setServerAction(null);
+          }
+        } else {
+          setHealth(null);
+          setHealthState("offline");
+          setHealthError(err instanceof Error ? err.message : "Servidor IA offline");
+        }
+      }
+    };
+
+    void init();
     return () => {
       cancelled = true;
     };
   }, [serverUrl, fetchImpl]);
 
   const refreshHealth = async () => {
+    const seq = ++healthSeqRef.current;
+    const isCurrent = () => mountedRef.current && healthSeqRef.current === seq;
     setHealthState("checking");
     setHealthError(null);
+    const bridge = getDesktopAIBridge();
     try {
       const h = await createMusicAIClient(serverUrl, fetchImpl).checkHealth();
+      if (!isCurrent()) return;
       setHealth(h);
       setHealthState("online");
+      if (bridge) {
+        bridge
+          .getServerStatus()
+          .then((s) => {
+            if (isCurrent()) setDesktopStatus(s);
+          })
+          .catch(() => {});
+      }
     } catch (err) {
+      if (!isCurrent()) return;
       setHealth(null);
       setHealthState("offline");
       setHealthError(err instanceof Error ? err.message : "Servidor IA offline");
+    }
+  };
+
+  const handleStartServer = async () => {
+    const bridge = getDesktopAIBridge();
+    setErrorMsg(null);
+    setStatusMsg(null);
+    if (!bridge) {
+      await refreshHealth();
+      return;
+    }
+    const seq = ++healthSeqRef.current;
+    const isCurrent = () => mountedRef.current && healthSeqRef.current === seq;
+    setServerAction("starting");
+    setHealthError(null);
+    try {
+      const res = await bridge.startServer();
+      if (!isCurrent()) return;
+      setDesktopStatus(res);
+      if (res.ok) {
+        const h = await createMusicAIClient(serverUrl, fetchImpl).checkHealth();
+        if (!isCurrent()) return;
+        setHealth(h);
+        setHealthState("online");
+        setHealthError(null);
+        setStatusMsg("Servidor IA iniciado e conectado.");
+      } else {
+        setHealth(null);
+        setHealthState("offline");
+        setHealthError(res.message || "Não foi possível iniciar o servidor IA.");
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      setHealth(null);
+      setHealthState("offline");
+      setHealthError(err instanceof Error ? err.message : "Falha ao iniciar o servidor IA.");
+    } finally {
+      if (isCurrent()) setServerAction(null);
+    }
+  };
+
+  const handleStopServer = async () => {
+    const bridge = getDesktopAIBridge();
+    if (!bridge) return;
+    const seq = ++healthSeqRef.current;
+    const isCurrent = () => mountedRef.current && healthSeqRef.current === seq;
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setServerAction("stopping");
+    try {
+      const res = await bridge.stopServer();
+      if (!isCurrent()) return;
+      setDesktopStatus(res);
+      if (res.running) {
+        setStatusMsg(res.message || "Servidor IA externo continua em execução.");
+        await refreshHealth();
+      } else {
+        setHealth(null);
+        setHealthState("offline");
+        setHealthError(null);
+        setStatusMsg(res.message || "Servidor IA parado.");
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      setErrorMsg(err instanceof Error ? err.message : "Falha ao parar o servidor IA.");
+    } finally {
+      if (mountedRef.current) setServerAction(null);
+    }
+  };
+
+  const handleDownloadWeights = async () => {
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setDownloadAuthRequired(false);
+    setLoadingAction("download");
+    try {
+      const res = await createMusicAIClient(serverUrl, fetchImpl).downloadModel({
+        model_name: modelName,
+        hf_token: hfToken.trim() || null,
+        save_token: saveHfToken,
+      });
+      if (!mountedRef.current) return;
+      if (res.success) {
+        setHfToken("");
+        await refreshHealth();
+        if (!mountedRef.current) return;
+        setStatusMsg(
+          res.message || `Pesos de ${AI_MODEL_LABELS[modelName].name} baixados com sucesso.`,
+        );
+      } else {
+        if (res.auth_required) {
+          setDownloadAuthRequired(true);
+        }
+        setErrorMsg(res.message || "Falha ao baixar os pesos do Hugging Face.");
+      }
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setErrorMsg(
+        err instanceof Error ? err.message : "Erro ao baixar pesos do Hugging Face.",
+      );
+    } finally {
+      if (mountedRef.current) setLoadingAction(null);
     }
   };
 
@@ -187,6 +377,28 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     });
   };
 
+  const buildSkillOptions = (): AIGenerationOptions => ({
+    mode,
+    modelName,
+    genre,
+    stylePrompt,
+    bars,
+    density,
+    polyphony,
+    noteDuration,
+    temperature,
+    useVelocity,
+    useMicrotiming,
+    inpaintRange:
+      mode === "inpaint"
+        ? {
+            startBar: Math.max(0, inpaintStartBar - 1),
+            endBar: Math.max(inpaintStartBar, Math.min(bars, inpaintEndBar)),
+            roles: inpaintRoles,
+          }
+        : undefined,
+  });
+
   const buildCurrentRequest = () => {
     if (!block) throw new Error("Nenhum bloco selecionado.");
     return buildGenerationRequest({
@@ -198,41 +410,104 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
       song,
       tonic,
       scaleId,
-      options: {
-        mode,
-        modelName,
-        genre,
-        stylePrompt,
-        bars,
-        density,
-        polyphony,
-        noteDuration,
-        temperature,
-        useVelocity,
-        useMicrotiming,
-        inpaintRange:
-          mode === "inpaint"
-            ? {
-                startBar: Math.max(0, inpaintStartBar - 1),
-                endBar: Math.max(inpaintStartBar, Math.min(bars, inpaintEndBar)),
-                roles: inpaintRoles,
-              }
-            : undefined,
-      },
+      options: buildSkillOptions(),
     });
   };
 
   const handleFetchPlan = async () => {
+    if (!block) {
+      setErrorMsg("Nenhum bloco selecionado.");
+      return;
+    }
     setErrorMsg(null);
     setStatusMsg(null);
+    if (healthState === "offline") {
+      const theoreticalPlan = buildOfflineSkillPlan({
+        block: {
+          ...block,
+          chords: editChords,
+          melody: editMelody,
+        },
+        song,
+        tonic,
+        scaleId,
+        options: buildSkillOptions(),
+      });
+      setPlan(theoreticalPlan);
+      setStatusMsg("Plano teórico consultado via Skill music-composition (sem IA).");
+      return;
+    }
+
     setLoadingAction("plan");
     try {
       const req = buildCurrentRequest();
       const theoreticalPlan = await createMusicAIClient(serverUrl, fetchImpl).createPlan(req);
+      if (!mountedRef.current) return;
       setPlan(theoreticalPlan);
       setStatusMsg("Plano teórico consultado via Skill music-composition.");
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Falha ao consultar plano teórico.");
+      if (!mountedRef.current) return;
+      if (err instanceof AIServerError && err.status === 0) {
+        const theoreticalPlan = buildOfflineSkillPlan({
+          block: {
+            ...block,
+            chords: editChords,
+            melody: editMelody,
+          },
+          song,
+          tonic,
+          scaleId,
+          options: buildSkillOptions(),
+        });
+        setPlan(theoreticalPlan);
+        setHealthState("offline");
+        setHealth(null);
+        setHealthError(err.message);
+        setStatusMsg("Servidor inacessível; plano teórico gerado via Skill music-composition (sem IA).");
+      } else {
+        setErrorMsg(err instanceof Error ? err.message : "Falha ao consultar plano teórico.");
+      }
+    } finally {
+      if (mountedRef.current) setLoadingAction(null);
+    }
+  };
+
+  const handleSkillGenerate = () => {
+    if (!block) return;
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setLoadingAction("generate");
+    try {
+      const seed = skillSeedRef.current++;
+      const { plan: skillPlan, patch } = generateOfflineSkillPatch({
+        block: {
+          ...block,
+          chords: editChords,
+          melody: editMelody,
+        },
+        song,
+        tonic,
+        scaleId,
+        options: { ...buildSkillOptions(), seed },
+        melodyGridBeats: gridBeats(melodyGrid, meter),
+      });
+
+      setResult(null);
+      setPlan(skillPlan);
+      applyAIGeneration(patch);
+      setAppliedCount((c) => c + 1);
+
+      const parts: string[] = [];
+      if (patch.chords) parts.push(`${patch.chords.length} acorde(s)`);
+      if (patch.melody) parts.push(`${patch.melody.length} nota(s) de melodia`);
+      if (patch.bassInstrument) parts.push("camada de baixo");
+      setStatusMsg(
+        parts.length
+          ? `Aplicado ao bloco "${block.name}" via Skill music-composition (sem IA): ${parts.join(", ")}.`
+          : "Geração simbólica concluída.",
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Erro na geração simbólica via Skill.");
     } finally {
       setLoadingAction(null);
     }
@@ -240,6 +515,8 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
 
   const handleGenerate = async () => {
     if (!block) return;
+    const targetBlockId = block.id;
+    const targetBlockName = block.name;
     setErrorMsg(null);
     setStatusMsg(null);
     setLoadingAction("generate");
@@ -247,6 +524,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
       const req = buildCurrentRequest();
       const client = createMusicAIClient(serverUrl, fetchImpl);
       const res = mode === "inpaint" ? await client.inpaint(req) : await client.generate(req);
+      if (!mountedRef.current) return;
       if (!res.success) {
         setErrorMsg(res.message || "Falha na geração MIDI-GPT.");
         setResult(res);
@@ -255,6 +533,11 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
 
       setResult(res);
       if (res.theoretical_plan) setPlan(res.theoretical_plan);
+
+      if (selectBlock(useStore.getState())?.id !== targetBlockId) {
+        setErrorMsg(`O bloco ativo mudou durante a geração; resultado de "${targetBlockName}" não foi aplicado.`);
+        return;
+      }
 
       const ctx = effectiveKey ? scaleContext(effectiveKey.tonic, effectiveKey.scaleId) : null;
       const patch = generationResultToBlockPatch(res, {
@@ -276,13 +559,14 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
       if (patch.bassInstrument) parts.push("camada de baixo");
       setStatusMsg(
         parts.length
-          ? `Aplicado ao bloco "${block.name}": ${parts.join(", ")} (${res.generation_time_sec.toFixed(2)}s).`
+          ? `Aplicado ao bloco "${targetBlockName}": ${parts.join(", ")} (${res.generation_time_sec.toFixed(2)}s).`
           : "Geração concluída.",
       );
     } catch (err) {
+      if (!mountedRef.current) return;
       setErrorMsg(err instanceof Error ? err.message : "Erro ao gerar com MIDI-GPT.");
     } finally {
-      setLoadingAction(null);
+      if (mountedRef.current) setLoadingAction(null);
     }
   };
 
@@ -303,6 +587,16 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     undo();
     setStatusMsg("Última alteração de IA desfeita (Ctrl+Z).");
   };
+
+  const bridge = getDesktopAIBridge();
+  const installedModels = installedModelNames(health);
+  const isSelectedModelInstalled = healthState === "online" && installedModels.includes(modelName);
+  const hfRepoUrl =
+    health?.hf_repo && /^https?:\/\//.test(health.hf_repo)
+      ? health.hf_repo
+      : health?.hf_repo
+        ? `https://huggingface.co/${health.hf_repo}`
+        : "https://huggingface.co/Metacreation/MIDI-GPT";
 
   const nonRestChordCount = editChords.filter((c) => !isRest(c)).length;
   const barOptions = Array.from(new Set([4, 8, 12, 16, blockBars])).sort((a, b) => a - b);
@@ -339,29 +633,134 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
         </div>
 
         <div className="ai-status-bar">
-          <div className={`ai-health-pill ${healthState}`}>
+          <div className={`ai-health-pill ${serverAction === "starting" ? "starting" : healthState}`}>
             <span className="ai-health-dot" aria-hidden="true" />
-            {healthState === "checking" && "Verificando motor MIDI-GPT..."}
-            {healthState === "online" &&
+            {serverAction === "starting" && "Iniciando servidor IA..."}
+            {serverAction === "stopping" && "Parando servidor IA..."}
+            {serverAction === null && healthState === "checking" && "Verificando motor MIDI-GPT..."}
+            {serverAction === null &&
+              healthState === "online" &&
               `Online · ${health?.device?.toUpperCase() ?? "CPU"} · Skill ${
                 health?.skill_loaded ? "carregada" : "padrão"
               }`}
-            {healthState === "offline" && "Servidor IA offline (127.0.0.1:8765)"}
+            {serverAction === null &&
+              healthState === "offline" &&
+              "Servidor IA offline (127.0.0.1:8765)"}
           </div>
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => void refreshHealth()}
-            disabled={loadingAction !== null}
-          >
-            ↻ Atualizar
-          </button>
+          <div className="ai-status-actions">
+            {(healthState === "offline" || serverAction === "starting") && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => void handleStartServer()}
+                disabled={loadingAction !== null || serverAction !== null}
+              >
+                {serverAction === "starting" ? "Iniciando..." : "▶ Iniciar servidor"}
+              </button>
+            )}
+            {healthState === "online" && desktopStatus?.managed && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => void handleStopServer()}
+                disabled={loadingAction !== null || serverAction !== null}
+              >
+                {serverAction === "stopping" ? "Parando..." : "⏹ Parar servidor"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => void refreshHealth()}
+              disabled={loadingAction !== null || serverAction !== null}
+            >
+              ↻ Atualizar
+            </button>
+          </div>
         </div>
 
-        {healthState === "offline" && healthError && (
-          <div className="ai-alert warn-box small" role="status">
-            {healthError}
-          </div>
+        {healthState === "offline" && serverAction !== "starting" && (
+          <>
+            {(desktopStatus?.missingPython || desktopStatus?.missingDeps) ? (
+              <div className="ai-alert warn-box small" role="status">
+                <strong>Python / dependências do MIDI-GPT não encontrados:</strong>{" "}
+                {desktopStatus.message} O <strong>Modo Skill (sem IA)</strong> está disponível abaixo
+                para gerar acordes, melodia e planos teóricos sem Python.
+              </div>
+            ) : (
+              healthError && (
+                <div className="ai-alert warn-box small" role="status">
+                  {healthError}
+                  {!bridge && (
+                    <>
+                      {" "}
+                      Inicie localmente com <code className="mono">python -m music_ai_module.server</code> ou
+                      use o <strong>Modo Skill (sem IA)</strong> abaixo.
+                    </>
+                  )}
+                </div>
+              )
+            )}
+            <div className="ai-skill-fallback-box small" role="region" aria-label="Modo Skill sem IA">
+              <strong>Modo Skill music-composition (sem IA / sem Python):</strong> consulte o plano
+              teórico e gere acordes, melodia, baixo ou inpainting no bloco atual com suporte a{" "}
+              <kbd>Ctrl+Z</kbd> mesmo sem servidor Python.
+            </div>
+          </>
+        )}
+
+        {healthState === "online" && !isSelectedModelInstalled && (
+          <section className="ai-weights-box" aria-label="Download de pesos do Hugging Face">
+            <div className="ai-weights-head">
+              <strong>
+                Pesos do modelo {AI_MODEL_LABELS[modelName].name} não instalados localmente
+              </strong>
+              <span className="small muted">
+                Baixe os checkpoints oficiais de{" "}
+                <a href={hfRepoUrl} target="_blank" rel="noopener noreferrer">
+                  {hfRepoUrl}
+                </a>
+                .
+              </span>
+            </div>
+            {downloadAuthRequired && (
+              <div className="ai-alert warn-box small" role="status">
+                Repositório gated (401/403): acesse{" "}
+                <a href={hfRepoUrl} target="_blank" rel="noopener noreferrer">
+                  Metacreation/MIDI-GPT
+                </a>
+                , aceite os termos/licença e informe um Access Token (<code className="mono">read</code>)
+                abaixo.
+              </div>
+            )}
+            <div className="ai-weights-form">
+              <input
+                type="password"
+                aria-label="Token Hugging Face"
+                placeholder="Token HF opcional (hf_...)"
+                value={hfToken}
+                onChange={(e) => setHfToken(e.target.value)}
+              />
+              <label className="check small">
+                <input
+                  type="checkbox"
+                  checked={saveHfToken}
+                  onChange={(e) => setSaveHfToken(e.target.checked)}
+                />
+                Salvar token no Hugging Face
+              </label>
+              <button
+                type="button"
+                className="btn primary small"
+                onClick={() => void handleDownloadWeights()}
+                disabled={loadingAction !== null || serverAction !== null}
+              >
+                {loadingAction === "download"
+                  ? "Baixando pesos..."
+                  : "⬇ Baixar pesos do Hugging Face"}
+              </button>
+            </div>
+          </section>
         )}
 
         <section className="ai-camelot-bar" aria-label="Chave Camelot">
@@ -482,14 +881,17 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
             <select
               aria-label="Modelo"
               value={modelName}
-              onChange={(e) => setModelName(e.target.value as AIGenModelName)}
+              onChange={(e) => {
+                setModelName(e.target.value as AIGenModelName);
+                setDownloadAuthRequired(false);
+              }}
             >
               {AI_MODELS.map((m) => {
-                const installed = health?.available_models?.includes(m);
+                const installed = installedModels.includes(m);
                 return (
                   <option key={m} value={m}>
                     {AI_MODEL_LABELS[m].name}
-                    {health ? (installed ? " ✓" : "") : ""}
+                    {health ? (installed ? " ✓" : " (não baixado)") : ""}
                   </option>
                 );
               })}
@@ -632,18 +1034,52 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
             type="button"
             className="btn"
             onClick={() => void handleFetchPlan()}
-            disabled={loadingAction !== null}
+            disabled={loadingAction !== null || serverAction !== null || !block}
           >
             {loadingAction === "plan" ? "Consultando..." : "📐 Consultar Plano Teórico"}
           </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => void handleGenerate()}
-            disabled={loadingAction !== null || !block}
-          >
-            {loadingAction === "generate" ? "Gerando..." : "✨ Gerar com MIDI-GPT"}
-          </button>
+          {healthState === "offline" ? (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={handleSkillGenerate}
+              disabled={loadingAction !== null || serverAction !== null || !block}
+            >
+              {loadingAction === "generate" ? "Gerando..." : "🎼 Gerar via Skill (sem IA)"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void handleGenerate()}
+                disabled={
+                  loadingAction !== null ||
+                  serverAction !== null ||
+                  !block ||
+                  healthState !== "online" ||
+                  !isSelectedModelInstalled
+                }
+                title={
+                  healthState === "online" && !isSelectedModelInstalled
+                    ? "Baixe os pesos do modelo no Hugging Face para habilitar o MIDI-GPT"
+                    : undefined
+                }
+              >
+                {loadingAction === "generate" ? "Gerando..." : "✨ Gerar com MIDI-GPT"}
+              </button>
+              {healthState === "online" && !isSelectedModelInstalled && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleSkillGenerate}
+                  disabled={loadingAction !== null || serverAction !== null || !block}
+                >
+                  🎼 Gerar via Skill (sem IA)
+                </button>
+              )}
+            </>
+          )}
           {appliedCount > 0 && (
             <button
               type="button"
@@ -697,7 +1133,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
                     onClick={handleApplyPlanChords}
                     disabled={!block || loadingAction !== null}
                   >
-                    Aplicar cifras do plano ao bloco
+                    ✓ Aplicar cifras do plano ao bloco
                   </button>
                 </div>
               </div>

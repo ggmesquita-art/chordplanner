@@ -5,14 +5,25 @@ Prioritizes local HuggingFace cache checkpoints without requiring network access
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import huggingface_hub
+from huggingface_hub.errors import (
+    GatedRepoError,
+    HfHubHTTPError,
+    RepositoryNotFoundError,
+)
 import torch
 from midigpt.inference.engine import InferenceEngine
 
 from music_ai_module.config import settings
+from music_ai_module.schemas import ModelDownloadResponse
+
+logger = logging.getLogger(__name__)
 
 KNOWN_MODEL_SPECS: Dict[str, dict] = {
     "expressive_medium": {
@@ -179,3 +190,109 @@ class ModelManager:
         if torch.cuda.is_available():
             return round(float(torch.cuda.memory_allocated()) / (1024.0 * 1024.0), 2)
         return 0.0
+
+    def is_hf_authenticated(self) -> bool:
+        """
+        Check whether a Hugging Face token is available in HF_TOKEN env var
+        or stored via huggingface_hub.
+        """
+        if os.environ.get("HF_TOKEN", "").strip():
+            return True
+        try:
+            token = huggingface_hub.get_token()
+            return bool(token and str(token).strip())
+        except Exception:
+            return False
+
+    def download_model(
+        self,
+        model_name: str,
+        hf_token: Optional[str] = None,
+        save_token: bool = False,
+    ) -> ModelDownloadResponse:
+        """
+        Download <model_name>-final.safetensors from Hugging Face if missing locally.
+        Handles gated repository / auth errors cleanly without exposing tokens in logs.
+        """
+        repo_url = f"https://huggingface.co/{settings.HF_REPO}"
+        existing = settings.resolve_checkpoint_path(model_name)
+        if existing is not None and existing.is_file():
+            return ModelDownloadResponse(
+                success=True,
+                model_name=model_name,
+                message=f"Pesos de {model_name} já disponíveis localmente.",
+                path=str(existing),
+                already_present=True,
+                repo_url=repo_url,
+            )
+
+        clean_token: Optional[str] = (
+            hf_token.strip() if hf_token and hf_token.strip() else None
+        )
+        filename = f"{model_name}-final.safetensors"
+
+        try:
+            downloaded_path = huggingface_hub.hf_hub_download(
+                repo_id=settings.HF_REPO,
+                filename=filename,
+                token=clean_token,
+            )
+            if save_token and clean_token:
+                try:
+                    huggingface_hub.login(
+                        token=clean_token,
+                        add_to_git_credential=False,
+                    )
+                except Exception as login_exc:
+                    logger.warning(
+                        "Could not persist Hugging Face token (%s)",
+                        type(login_exc).__name__,
+                    )
+            return ModelDownloadResponse(
+                success=True,
+                model_name=model_name,
+                message=f"Download de {model_name} concluído com sucesso.",
+                path=str(downloaded_path),
+                already_present=False,
+                auth_required=False,
+                repo_url=repo_url,
+            )
+        except (GatedRepoError, RepositoryNotFoundError):
+            return ModelDownloadResponse(
+                success=False,
+                model_name=model_name,
+                message=(
+                    f"Acesso negado ao repositório gated {settings.HF_REPO}. "
+                    "Aceite os termos no Hugging Face e informe seu Access Token (read)."
+                ),
+                auth_required=True,
+                repo_url=repo_url,
+            )
+        except HfHubHTTPError as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code in (401, 403):
+                return ModelDownloadResponse(
+                    success=False,
+                    model_name=model_name,
+                    message=(
+                        f"Acesso negado ao repositório gated {settings.HF_REPO}. "
+                        "Aceite os termos no Hugging Face e informe seu Access Token (read)."
+                    ),
+                    auth_required=True,
+                    repo_url=repo_url,
+                )
+            return ModelDownloadResponse(
+                success=False,
+                model_name=model_name,
+                message=str(exc),
+                auth_required=False,
+                repo_url=repo_url,
+            )
+        except Exception as exc:
+            return ModelDownloadResponse(
+                success=False,
+                model_name=model_name,
+                message=str(exc),
+                auth_required=False,
+                repo_url=repo_url,
+            )

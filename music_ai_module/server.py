@@ -8,8 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from music_ai_module.config import settings
 from music_ai_module.orchestrator import MusicAIOrchestrator
@@ -17,6 +19,8 @@ from music_ai_module.schemas import (
     GenerationRequest,
     GenerationResult,
     InpaintRange,
+    ModelDownloadRequest,
+    ModelDownloadResponse,
     TheoreticalPlan,
     TrackRole,
 )
@@ -42,6 +46,13 @@ orchestrator = MusicAIOrchestrator()
 _REQUEST_OPENAPI = {
     "requestBody": {
         "content": {"application/json": {"schema": GenerationRequest.model_json_schema()}},
+        "required": True,
+    }
+}
+
+_DOWNLOAD_REQUEST_OPENAPI = {
+    "requestBody": {
+        "content": {"application/json": {"schema": ModelDownloadRequest.model_json_schema()}},
         "required": True,
     }
 }
@@ -73,9 +84,33 @@ async def health_check() -> Dict[str, Any]:
         "model_loaded": is_loaded,
         "default_model": default_model,
         "available_models": available_models,
+        "models_installed": [m["name"] for m in available_models],
+        "hf_repo": settings.HF_REPO,
+        "hf_authenticated": orchestrator.model_manager.is_hf_authenticated(),
         "skill_loaded": skill_loaded,
         "device": device,
     }
+
+
+@app.post("/models/download", response_model=ModelDownloadResponse, openapi_extra=_DOWNLOAD_REQUEST_OPENAPI)
+async def download_model(request: Request) -> ModelDownloadResponse:
+    """
+    Download MIDI-GPT model weights from Hugging Face if missing locally.
+    """
+    try:
+        body = await request.body()
+        dl_req = ModelDownloadRequest.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_input=False))
+    except Exception:
+        raise HTTPException(status_code=422, detail="Payload JSON inválido para download de modelo.")
+
+    return await anyio.to_thread.run_sync(
+        orchestrator.model_manager.download_model,
+        dl_req.model_name,
+        dl_req.hf_token,
+        dl_req.save_token,
+    )
 
 
 @app.post("/plan", response_model=TheoreticalPlan, openapi_extra=_REQUEST_OPENAPI)

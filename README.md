@@ -1,4 +1,4 @@
-# ChordPlanner (v0.2.0)
+# ChordPlanner (v0.2.1)
 
 Planejador de progressões de acordes guiado por escala com Roda Harmônica / Camelot, Linha do Tempo de 3 Camadas (Arranjo, Melodia e Acordes) e Módulo de Inteligência Artificial Neuro-Simbólica (`MIDI-GPT` + `music-composition` Skill).
 
@@ -6,7 +6,7 @@ Design original em [`DESIGN.md`](DESIGN.md) · Roadmap e especificações em [`R
 
 ---
 
-## 🚀 Novidades da Versão 0.2.0 (v4 + IA Musical)
+## 🚀 Novidades da Versão 0.2.1 (v4 + IA Empacotada)
 
 - **Camada de Melodia (Piano Roll compacto)**:
   - Piano roll horizontal acoplado e sincronizado com a pista de acordes.
@@ -24,7 +24,7 @@ Design original em [`DESIGN.md`](DESIGN.md) · Roadmap e especificações em [`R
 - **Módulo de IA Musical Neuro-Simbólico (`music_ai_module`)**:
   - Combina o motor generativo **Metacreation/MIDI-GPT** (`midigpt` 0.4.2 com checkpoints locais `expressive_medium`, `prism_medium`, `yellow_medium` e `yellow_small`) com a base teórica da **Skill `music-composition`**.
   - Modal **✨ IA Musical** acessível pelo cabeçalho, com Roda Camelot sincronizada (`1A..12A`, `1B..12B`), modos de geração (*Harmonizar Melodia*, *Gerar Melodia*, *Acompanhamento Completo*, *Inpainting de Compassos*) e aplicação atômica no bloco com **Desfazer/Refazer (`Ctrl+Z`)**.
-  - Servidor local FastAPI (`127.0.0.1:8765`) e interface de linha de comando (`cli.py`).
+  - Servidor local FastAPI (`127.0.0.1:8765`) empacotado com o app desktop (`resources/ai-server/`), com início automático ao abrir a área de IA Musical, botão **"Iniciar servidor"**, download de pesos do Hugging Face sob demanda quando ausentes e modo offline completo via **Skill `music-composition` (sem IA)** caso Python/dependências não estejam instalados.
 - **Ajustes de Layout**:
   - Opção **"Ajustar na área visível"** (checkbox no Dock) para redimensionar melodia e acordes sem necessidade de rolagem horizontal.
   - **Arranjo horizontal dinâmico**: novos blocos dividem proporcionalmente a largura sem crescer verticalmente e barra de ações de bloco em linha única (`.block-actions-bar`).

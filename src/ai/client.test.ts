@@ -5,8 +5,10 @@ import {
   chordsToNoteEvents,
   createMusicAIClient,
   generationResultToBlockPatch,
+  installedModelNames,
   parseChordSymbol,
   planToChords,
+  type AIHealthStatus,
   type GenerationResult,
 } from "./client";
 import { makeChord } from "../core/chords";
@@ -350,5 +352,90 @@ describe("createMusicAIClient", () => {
 
     await expect(client.createPlan(req)).rejects.toThrow(AIServerError);
     await expect(client.generate(req)).rejects.toThrow(/Servidor IA local indisponível/);
+  });
+
+  it("normaliza modelos instalados em installedModelNames (string[], AIModelInfo[] e models_installed)", () => {
+    expect(installedModelNames(null)).toEqual([]);
+    expect(installedModelNames(undefined)).toEqual([]);
+
+    const fromStrings: AIHealthStatus = {
+      status: "ok",
+      model_loaded: false,
+      default_model: "expressive_medium",
+      available_models: ["expressive_medium", "yellow_small", "expressive_medium"],
+      skill_loaded: true,
+      device: "cpu",
+    };
+    expect(installedModelNames(fromStrings)).toEqual(["expressive_medium", "yellow_small"]);
+
+    const fromObjects: AIHealthStatus = {
+      status: "ok",
+      model_loaded: true,
+      default_model: "expressive_medium",
+      available_models: [
+        { name: "expressive_medium", size_mb: 1800, loaded: true, device: "cuda" },
+        { name: "prism_medium", size_mb: 1600, loaded: false },
+      ],
+      skill_loaded: true,
+      device: "cuda",
+    };
+    expect(installedModelNames(fromObjects)).toEqual(["expressive_medium", "prism_medium"]);
+
+    const withExplicitInstalled: AIHealthStatus = {
+      status: "ok",
+      model_loaded: false,
+      default_model: "expressive_medium",
+      available_models: [{ name: "expressive_medium" }, { name: "yellow_small" }],
+      models_installed: ["yellow_small"],
+      hf_repo: "Metacreation/MIDI-GPT",
+      hf_authenticated: false,
+      skill_loaded: true,
+      device: "cpu",
+    };
+    expect(installedModelNames(withExplicitInstalled)).toEqual(["yellow_small"]);
+
+    const noneInstalled: AIHealthStatus = {
+      ...withExplicitInstalled,
+      models_installed: [],
+    };
+    expect(installedModelNames(noneInstalled)).toEqual([]);
+  });
+
+  it("chama POST /models/download via client.downloadModel", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          model_name: "expressive_medium",
+          message: "Modelo baixado com sucesso",
+          path: "/models/expressive_medium",
+          already_present: false,
+          auth_required: false,
+          repo_url: "https://huggingface.co/Metacreation/MIDI-GPT",
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const client = createMusicAIClient("http://127.0.0.1:8765", fetchMock);
+    const res = await client.downloadModel({
+      model_name: "expressive_medium",
+      hf_token: "hf_secret",
+      save_token: true,
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.model_name).toBe("expressive_medium");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/models/download",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          model_name: "expressive_medium",
+          hf_token: "hf_secret",
+          save_token: true,
+        }),
+      }),
+    );
   });
 });

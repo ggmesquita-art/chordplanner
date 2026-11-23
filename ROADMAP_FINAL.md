@@ -10,6 +10,14 @@
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
 - **Saúde:** typecheck, lint e build limpos; 526 testes passando no frontend (Vitest) e 48 testes passando no módulo de IA (pytest) (23/11/2026).
 
+### Entregue na v0.2.1 (23/11/2026)
+
+- **Empacotamento do Servidor IA & Modo Skill Offline**:
+  - `music_ai_module` + skill `music-composition` + suporte a binário standalone (`dist-ai/`) empacotados no instalador desktop (`resources/ai-server/`).
+  - Auto-início do servidor IA ao abrir o painel no app desktop (`electron/preload.cjs` + `electron/main.js`) e botão **"▶ Iniciar servidor"** / **"⏹ Parar servidor"**.
+  - Detecção de pesos ausentes no `/health` e endpoint `POST /models/download` com fluxo na UI para baixar `Metacreation/MIDI-GPT` do Hugging Face (com tratamento de repositório gated).
+  - Fallback completo via **Skill `music-composition` (sem IA)** em TypeScript (`src/ai/skillFallback.ts`) caso o usuário não tenha Python/dependências ou pesos instalados.
+
 ### Entregue na v0.2.0 (23/11/2026)
 
 - **Módulo de IA Musical Neuro-Simbólica (`music_ai_module`)**:

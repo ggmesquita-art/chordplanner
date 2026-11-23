@@ -12,16 +12,19 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 
-from music_ai_module.config import settings
+from music_ai_module.config import Settings, settings
 from music_ai_module.orchestrator import MusicAIOrchestrator
 from music_ai_module.schemas import (
     CamelotKey,
     GenerationRequest,
     GenerationResult,
     InpaintRange,
+    ModelDownloadResponse,
     NoteEvent,
     TheoreticalPlan,
     TrackInput,
@@ -143,8 +146,97 @@ def test_server_health_endpoint(client: TestClient) -> None:
     assert data["default_model"] == settings.DEFAULT_MODEL_NAME
     assert isinstance(data["available_models"], list)
     assert len(data["available_models"]) >= 1
+    assert data["models_installed"] == [m["name"] for m in data["available_models"]]
+    assert data["hf_repo"] == settings.HF_REPO
+    assert isinstance(data["hf_authenticated"], bool)
     assert data["skill_loaded"] is True
     assert isinstance(data["device"], str)
+
+
+def test_server_models_download_already_present(client: TestClient, tmp_path: Path) -> None:
+    existing_file = tmp_path / "expressive_medium-final.safetensors"
+    existing_file.write_bytes(b"weights")
+
+    with patch.object(Settings, "resolve_checkpoint_path", return_value=existing_file):
+        resp = client.post("/models/download", json={"model_name": "expressive_medium"})
+
+    assert resp.status_code == 200
+    res = ModelDownloadResponse.model_validate_json(resp.text)
+    assert res.success is True
+    assert res.model_name == "expressive_medium"
+    assert res.already_present is True
+    assert res.auth_required is False
+    assert res.path == str(existing_file)
+
+
+def test_server_models_download_success(client: TestClient, tmp_path: Path) -> None:
+    downloaded_file = tmp_path / "prism_medium-final.safetensors"
+    downloaded_file.write_bytes(b"hf-weights")
+
+    with (
+        patch.object(Settings, "resolve_checkpoint_path", return_value=None),
+        patch("huggingface_hub.hf_hub_download", return_value=str(downloaded_file)) as mock_dl,
+        patch("huggingface_hub.login") as mock_login,
+    ):
+        resp = client.post(
+            "/models/download",
+            json={
+                "model_name": "prism_medium",
+                "hf_token": "hf_test_token_value",
+                "save_token": True,
+            },
+        )
+
+    assert resp.status_code == 200
+    res = ModelDownloadResponse.model_validate_json(resp.text)
+    assert res.success is True
+    assert res.model_name == "prism_medium"
+    assert res.already_present is False
+    assert res.auth_required is False
+    assert res.path == str(downloaded_file)
+    mock_dl.assert_called_once_with(
+        repo_id=settings.HF_REPO,
+        filename="prism_medium-final.safetensors",
+        token="hf_test_token_value",
+    )
+    mock_login.assert_called_once_with(
+        token="hf_test_token_value",
+        add_to_git_credential=False,
+    )
+
+
+def test_server_models_download_gated_error(client: TestClient) -> None:
+    gated_resp = httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co"))
+    gated_exc = GatedRepoError("Access to gated repo is restricted", response=gated_resp)
+
+    with (
+        patch.object(Settings, "resolve_checkpoint_path", return_value=None),
+        patch("huggingface_hub.hf_hub_download", side_effect=gated_exc),
+    ):
+        resp = client.post("/models/download", json={"model_name": "yellow_medium"})
+
+    assert resp.status_code == 200
+    res = ModelDownloadResponse.model_validate_json(resp.text)
+    assert res.success is False
+    assert res.model_name == "yellow_medium"
+    assert res.auth_required is True
+    assert res.repo_url == f"https://huggingface.co/{settings.HF_REPO}"
+
+    unauth_resp = httpx.Response(401, request=httpx.Request("GET", "https://huggingface.co"))
+    unauth_exc = HfHubHTTPError("Unauthorized", response=unauth_resp)
+
+    with (
+        patch.object(Settings, "resolve_checkpoint_path", return_value=None),
+        patch("huggingface_hub.hf_hub_download", side_effect=unauth_exc),
+    ):
+        resp_401 = client.post("/models/download", json={"model_name": "yellow_small"})
+
+    assert resp_401.status_code == 200
+    res_401 = ModelDownloadResponse.model_validate_json(resp_401.text)
+    assert res_401.success is False
+    assert res_401.model_name == "yellow_small"
+    assert res_401.auth_required is True
+    assert res_401.repo_url == f"https://huggingface.co/{settings.HF_REPO}"
 
 
 def test_server_plan_endpoint(client: TestClient, sample_request: GenerationRequest) -> None:

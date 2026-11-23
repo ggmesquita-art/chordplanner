@@ -1,7 +1,7 @@
 {
   "name": "chordplanner",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "app": "vite build && electron .",
     "app:samples": "vite build && electron . --mirror-samples",
     "app:dist": "vite build && electron-builder --mac --publish never",
-    "app:dist:win": "vite build && electron-builder --win --publish never"
+    "app:dist:win": "vite build && electron-builder --win --publish never",
+    "ai:server": "python -m music_ai_module.server"
   },
   "dependencies": {
     "@tonejs/midi": "^2.0.28",
@@ -47,6 +48,7 @@
     "files": [
       "dist/**/*",
       "electron/main.js",
+      "electron/preload.cjs",
       "package.json",
       "!node_modules/**/*"
     ],
@@ -57,6 +59,35 @@
         "filter": [
           "**/*",
           "!**/*.tmp"
+        ]
+      },
+      {
+        "from": "music_ai_module",
+        "to": "ai-server/music_ai_module",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.pytest_cache/**",
+          "!tests/**",
+          "!.venv*/**",
+          "!models/**"
+        ]
+      },
+      {
+        "from": ".agents/skills/music-composition",
+        "to": "ai-server/music-composition",
+        "filter": [
+          "**/*",
+          "!benchmarks/**",
+          "!.git/**"
+        ]
+      },
+      {
+        "from": "dist-ai",
+        "to": "ai-server",
+        "filter": [
+          "**/*"
         ]
       }
     ],

@@ -361,4 +361,220 @@ describe("AIPanel & integração com Header/TopBar/Store", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /Gerar com MIDI-GPT/i })));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Erro interno no motor"));
   });
+
+  it("inicia automaticamente o servidor via window.chordplannerAI ao abrir offline no desktop", async () => {
+    let serverRunning = false;
+    const bridge = {
+      startServer: vi.fn(async () => {
+        serverRunning = true;
+        return {
+          ok: true,
+          running: true,
+          starting: false,
+          managed: true,
+          pid: 4321,
+          message: "Servidor iniciado",
+        };
+      }),
+      stopServer: vi.fn(async () => {
+        serverRunning = false;
+        return {
+          ok: true,
+          running: false,
+          starting: false,
+          managed: false,
+          pid: null,
+          message: "Servidor parado",
+        };
+      }),
+      getServerStatus: vi.fn(async () => ({
+        ok: true,
+        running: serverRunning,
+        starting: false,
+        managed: serverRunning,
+        pid: serverRunning ? 4321 : null,
+        message: serverRunning ? "Ativo" : "Parado",
+      })),
+    };
+    vi.stubGlobal("chordplannerAI", bridge);
+
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/health")) {
+        if (!serverRunning) throw new TypeError("ECONNREFUSED");
+        return jsonResponse(HEALTH_OK);
+      }
+      return jsonResponse({}, 404);
+    });
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+
+    await waitFor(() => expect(bridge.startServer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/Online · CUDA/i)).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Parar servidor/i })).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Parar servidor/i })));
+    await waitFor(() => expect(bridge.stopServer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/Servidor IA offline/i)).toBeTruthy());
+  });
+
+  it("trata clique manual em Iniciar servidor quando missingPython/missingDeps é retornado e oferece Modo Skill", async () => {
+    const bridge = {
+      startServer: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          running: false,
+          starting: false,
+          managed: false,
+          pid: null,
+          message: "Falha inicial",
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          running: false,
+          starting: false,
+          managed: false,
+          pid: null,
+          missingPython: true,
+          missingDeps: true,
+          message: "Python 3.10+ ou torch/midigpt ausentes",
+        }),
+      stopServer: vi.fn(),
+      getServerStatus: vi.fn(),
+    };
+    vi.stubGlobal("chordplannerAI", bridge);
+
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("ECONNREFUSED"));
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Iniciar servidor/i })).toBeTruthy());
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Iniciar servidor/i })));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Python \/ dependências do MIDI-GPT não encontrados/i)).toBeTruthy();
+    });
+    expect(screen.getByRole("region", { name: /Modo Skill sem IA/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Gerar via Skill \(sem IA\)/i })).toBeTruthy();
+  });
+
+  it("gera acordes, melodia e plano teórico via Skill (sem IA) quando offline com suporte a undo()", async () => {
+    act(() => {
+      useStore.getState().setBlockChords([]);
+    });
+
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("ECONNREFUSED"));
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+    await waitFor(() => expect(screen.getByText(/Servidor IA offline/i)).toBeTruthy());
+
+    // Consulta plano teórico offline
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Consultar Plano Teórico/i })));
+    await waitFor(() =>
+      expect(screen.getByText(/Modo offline, sem servidor MIDI-GPT/i)).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: /✓ Aplicar cifras do plano/i })).toBeTruthy();
+
+    // Gera bloco completo via Skill (sem IA)
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Gerar via Skill \(sem IA\)/i })));
+
+    const generated = selectBlock(useStore.getState())!;
+    expect(generated.chords.length).toBeGreaterThanOrEqual(4);
+    expect((generated.melody ?? []).length).toBeGreaterThan(0);
+
+    act(() => useStore.getState().undo());
+    const reverted = selectBlock(useStore.getState())!;
+    expect(reverted.chords).toEqual([]);
+    expect(reverted.melody ?? []).toEqual([]);
+  });
+
+  it("exibe card de download do Hugging Face quando pesos estão ausentes, trata auth_required e habilita MIDI-GPT após download", async () => {
+    let weightsDownloaded = false;
+    let downloadCalls = 0;
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/health")) {
+        return jsonResponse({
+          status: "ok",
+          model_loaded: weightsDownloaded,
+          default_model: "expressive_medium",
+          available_models: [
+            { name: "expressive_medium", loaded: weightsDownloaded, device: "cpu" },
+          ],
+          models_installed: weightsDownloaded ? ["expressive_medium"] : [],
+          hf_repo: "Metacreation/MIDI-GPT",
+          hf_authenticated: weightsDownloaded,
+          skill_loaded: true,
+          device: "cpu",
+        });
+      }
+      if (url.endsWith("/models/download")) {
+        downloadCalls += 1;
+        const body = JSON.parse(String(init?.body)) as {
+          model_name: string;
+          hf_token: string | null;
+          save_token: boolean;
+        };
+        if (downloadCalls === 1) {
+          return jsonResponse({
+            success: false,
+            model_name: body.model_name,
+            message: "Repositório gated requer token válido.",
+            path: null,
+            already_present: false,
+            auth_required: true,
+            repo_url: "https://huggingface.co/Metacreation/MIDI-GPT",
+          });
+        }
+        expect(body.hf_token).toBe("hf_valid_token");
+        expect(body.save_token).toBe(true);
+        weightsDownloaded = true;
+        return jsonResponse({
+          success: true,
+          model_name: body.model_name,
+          message: "Pesos baixados com sucesso.",
+          path: "/models/expressive_medium",
+          already_present: false,
+          auth_required: false,
+          repo_url: "https://huggingface.co/Metacreation/MIDI-GPT",
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: /Download de pesos do Hugging Face/i })).toBeTruthy(),
+    );
+
+    const midiGptBtn = screen.getByRole("button", { name: /Gerar com MIDI-GPT/i }) as HTMLButtonElement;
+    expect(midiGptBtn.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Gerar via Skill \(sem IA\)/i })).toBeTruthy();
+
+    // Primeira tentativa sem token -> auth_required
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: /Baixar pesos do Hugging Face/i })),
+    );
+    await waitFor(() => expect(screen.getByText(/Repositório gated \(401\/403\)/i)).toBeTruthy());
+
+    // Segunda tentativa com token + salvar token -> sucesso e atualiza /health
+    fireEvent.change(screen.getByLabelText("Token Hugging Face"), {
+      target: { value: "hf_valid_token" },
+    });
+    fireEvent.click(screen.getByLabelText("Salvar token no Hugging Face"));
+
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: /Baixar pesos do Hugging Face/i })),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: /Download de pesos do Hugging Face/i })).toBeNull();
+    });
+    const enabledMidiBtn = screen.getByRole("button", { name: /Gerar com MIDI-GPT/i }) as HTMLButtonElement;
+    expect(enabledMidiBtn.disabled).toBe(false);
+  });
 });

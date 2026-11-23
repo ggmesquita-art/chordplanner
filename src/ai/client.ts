@@ -164,14 +164,84 @@ export type GenerationResult = {
   model_used: string;
 };
 
+export type AIModelInfo = {
+  name: string;
+  path?: string;
+  size_mb?: number;
+  loaded?: boolean;
+  device?: string;
+  num_bars_map?: number[];
+};
+
 export type AIHealthStatus = {
   status: string;
   model_loaded: boolean;
   default_model: string;
-  available_models: string[];
+  available_models: (string | AIModelInfo)[];
+  models_installed?: string[];
+  hf_repo?: string;
+  hf_authenticated?: boolean;
   skill_loaded: boolean;
   device: string;
 };
+
+export function installedModelNames(health: AIHealthStatus | null | undefined): string[] {
+  if (!health) return [];
+  const raw = Array.isArray(health.models_installed)
+    ? health.models_installed
+    : (health.available_models ?? []).map((item) => (typeof item === "string" ? item : item.name));
+  return Array.from(
+    new Set(raw.filter((name): name is string => typeof name === "string" && name.length > 0)),
+  );
+}
+
+export type ModelDownloadRequest = {
+  model_name: AIGenModelName;
+  hf_token?: string | null;
+  save_token?: boolean;
+};
+
+export type ModelDownloadResponse = {
+  success: boolean;
+  model_name: string;
+  message: string;
+  path: string | null;
+  already_present: boolean;
+  auth_required: boolean;
+  repo_url: string;
+};
+
+export type DesktopAIServerStatus = {
+  ok: boolean;
+  running: boolean;
+  starting: boolean;
+  managed: boolean;
+  pid: number | null;
+  message: string;
+  missingPython?: boolean;
+  missingDeps?: boolean;
+  recentLogs?: string[];
+};
+
+export type DesktopAIBridge = {
+  startServer: () => Promise<DesktopAIServerStatus>;
+  stopServer: () => Promise<DesktopAIServerStatus>;
+  getServerStatus: () => Promise<DesktopAIServerStatus>;
+};
+
+export function getDesktopAIBridge(): DesktopAIBridge | null {
+  const candidate = (globalThis as { chordplannerAI?: unknown }).chordplannerAI;
+  if (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    typeof (candidate as DesktopAIBridge).startServer === "function" &&
+    typeof (candidate as DesktopAIBridge).stopServer === "function" &&
+    typeof (candidate as DesktopAIBridge).getServerStatus === "function"
+  ) {
+    return candidate as DesktopAIBridge;
+  }
+  return null;
+}
 
 export type AIGenerationOptions = {
   mode: GenerationMode;
@@ -846,6 +916,14 @@ export function createMusicAIClient(
       return requestJson<GenerationResult>(
         `${cleanBase}/inpaint`,
         { method: "POST", body: JSON.stringify(request) },
+        fetchImpl,
+      );
+    },
+
+    downloadModel(req: ModelDownloadRequest): Promise<ModelDownloadResponse> {
+      return requestJson<ModelDownloadResponse>(
+        `${cleanBase}/models/download`,
+        { method: "POST", body: JSON.stringify(req) },
         fetchImpl,
       );
     },
