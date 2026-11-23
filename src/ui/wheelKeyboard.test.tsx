@@ -23,7 +23,8 @@ beforeEach(() => {
   const st = useStore.getState();
   st.newSong();
   st.setMode("colorful");
-  st.setTonic(0); // Dó maior (escala "major"), com o acorde da tônica já na progressão
+  st.setTonic(0); // Dó maior (escala "major")
+  st.addChord(0, "maj"); // com o acorde da tônica já na progressão
 });
 afterEach(cleanup);
 

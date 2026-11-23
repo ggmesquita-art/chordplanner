@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeChord, type Chord } from "../core/chords";
+import { makeChord, makeRest, type Chord } from "../core/chords";
+import { makeMelodyNote } from "../core/melody";
 import { expandArrangement, makeSong, type Song } from "../core/song";
 
 vi.mock("../core/voicing", async (orig) => {
@@ -169,5 +170,76 @@ describe("bordão e baixo na mesma altura", () => {
     expect(notes.some((n) => n.isBass && n.midi === 36)).toBe(false);
     expect(notes.some((n) => n.isBass && n.midi === 43)).toBe(true);
     expect(notes.filter((n) => n.eventIndex === 0 && n.velocity !== 0.4).length).toBeGreaterThan(0);
+  });
+});
+
+describe("Etapa 6 (melodia, N.C. e acordes curtos)", () => {
+  it("renderiza melodia com instrumento próprio, canal separado e swing nas colcheias fracas", () => {
+    const song = makeSong();
+    song.bpm = 120;
+    song.melodyInstrument = "flute";
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.chords = [makeChord(0, "maj", 4)];
+    b.melody = [makeMelodyNote(72, 0, 0.5, 0.9), makeMelodyNote(74, 0.5, 0.5, 0.8)];
+    const ex = expandArrangement(song);
+    const mel = renderNotes(ex, { ...base, swing: 60, melodyChannelFor: () => 5 }).filter((n) => n.isMelody);
+    expect(mel).toHaveLength(2);
+    expect(mel[0].instrument).toBe("flute");
+    expect(mel[0].channel).toBe(5);
+    expect(mel[0].time).toBe(0);
+    // Colcheia fraca em 0.5 tempo atrasa pelo swing.
+    expect(mel[1].time).toBeGreaterThan(0.25);
+  });
+
+  it("no respiro (N.C.), silencia acordes/baixo, preserva voiceLeading, mantém bordão e metrônomo", () => {
+    const song = makeSong();
+    song.bpm = 60;
+    song.voiceLeading = true;
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.instrument = "bagpipe";
+    b.drone = true;
+    b.chords = [makeChord(0, "maj", 2), makeRest(2), makeChord(7, "maj", 2)];
+    const ex = expandArrangement(song);
+    const notes = renderNotes(ex, { ...base, voiceLeading: true, tonicFor: () => 0 });
+    expect(notes.filter((n) => n.eventIndex === 1)).toEqual([]);
+    // voiceLeading pulou o N.C. e comparou G com o acorde anterior (C).
+    expect(vi.mocked(voiceChord).mock.calls).toHaveLength(2);
+    expect(vi.mocked(voiceChord).mock.calls[1][1]).toEqual(vi.mocked(voiceChord).mock.results[0].value);
+    // Bordão continua pelo bloco inteiro (6s).
+    const drone = notes.find((n) => n.velocity === 0.4)!;
+    expect(drone.duration).toBeCloseTo(6);
+    // Metrônomo clica durante os 6 tempos, inclusive durante o N.C.
+    expect(metronomeClicks(ex).map((c) => c.time)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it("acordes de 0.25 tempo com humanize: true nunca vazam além de durationSec", () => {
+    for (const pattern of ["block", "arp-up", "comping"] as const) {
+      const song = build([0.25, 0.25], { bpm: 180, pattern });
+      const ex = expandArrangement(song);
+      const notes = renderNotes(ex, { ...base, humanize: true, swing: 50, rng: () => 0.99 });
+      for (const n of notes) {
+        const ev = ex.events[n.eventIndex];
+        expect(n.time + n.duration, `${pattern} ev ${n.eventIndex}`).toBeLessThanOrEqual(ev.startSec + ev.durationSec + 1e-6);
+      }
+    }
+  });
+
+  it("notas de melodia de 0.25 tempo a 300 BPM com swing 75 não ultrapassam a nota seguinte", () => {
+    const song = makeSong();
+    song.bpm = 300;
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.chords = [];
+    b.melody = [
+      makeMelodyNote(60, 0, 0.25),
+      makeMelodyNote(62, 0.25, 0.25),
+      makeMelodyNote(64, 0.5, 0.25),
+      makeMelodyNote(65, 0.75, 0.25),
+    ];
+    const ex = expandArrangement(song);
+    const mel = renderNotes(ex, { ...base, swing: 75 }).filter((n) => n.isMelody).sort((a, b2) => a.time - b2.time);
+    expect(mel).toHaveLength(4);
+    for (let i = 0; i < mel.length - 1; i++) {
+      expect(mel[i].time + mel[i].duration).toBeLessThanOrEqual(mel[i + 1].time + 1e-6);
+    }
   });
 });

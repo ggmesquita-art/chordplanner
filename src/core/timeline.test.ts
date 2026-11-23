@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { barLinesWithin, gridBeats, snapDuration, stepDuration, type Meter } from "./timeline";
+import { barLinesWithin, GRIDS, gridBeats, missingBeats, snapDuration, stepDuration, type Meter } from "./timeline";
 
 const m44: Meter = [4, 4];
 const m68: Meter = [6, 8];
 const m78: Meter = [7, 8];
 
 describe("gridBeats", () => {
-  it("devolve a unidade ou o compasso", () => {
+  it("inclui 0.25 e devolve a unidade ou o compasso", () => {
+    expect(GRIDS).toContain(0.25);
+    expect(gridBeats(0.25, m44)).toBe(0.25);
     expect(gridBeats(0.5, m44)).toBe(0.5);
     expect(gridBeats(2, m68)).toBe(2);
     expect(gridBeats("bar", m68)).toBe(6);
     expect(gridBeats("bar", m44)).toBe(4);
+    expect(missingBeats(4, m44)).toBe(0);
+    expect(missingBeats(3.75, m44)).toBeCloseTo(0.25);
   });
 });
 

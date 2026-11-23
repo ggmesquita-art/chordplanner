@@ -4,6 +4,8 @@
 import { Midi } from "@tonejs/midi";
 import { instrumentByPatchID } from "@tonejs/midi/dist/InstrumentMaps";
 import { gmProgram, renderNotes } from "../audio/render";
+import { isRest } from "../core/chords";
+import { DEFAULT_MELODY_INSTRUMENT } from "../core/melody";
 import { chordSymbol } from "../core/modifiers";
 import { resolveNotation, toAscii } from "../core/notation";
 import type { Speller } from "../core/pitch";
@@ -15,6 +17,8 @@ const ACOUSTIC_BASS = 32;
 export type MidiExportOptions = {
   /** Canal global 1–16 (blocos podem sobrescrever com `midiChannel`). */
   channel: number;
+  /** Canal global 1–16 para a pista de melodia (padrão: 2). */
+  melodyChannel?: number;
   /** Separa o baixo do voicing numa trilha própria. */
   splitBass: boolean;
   /** Tônica (pitch class) do bloco para o bordão (respeita a tonalidade própria do bloco); sem ela, o bloco não exporta bordão. */
@@ -67,21 +71,25 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
   if (opts.title?.trim()) midi.header.name = opts.title.trim();
   const meta: typeof midi.header.meta = expanded.markers.map((m) => ({ type: "marker", text: m.name, ticks: tickAtSec(m.startSec) }));
   if (opts.chordNames !== false) {
-    // Nome do acorde em cada ataque (DAWs e MuseScore mostram lyrics); sem repetir enquanto o mesmo acorde continua.
+    // Nome do acorde em cada ataque (DAWs e MuseScore mostram lyrics); em pausas explícitas emite "N.C.".
     const spellFor = resolveNotation({ spellFor: opts.spellFor }).spellFor;
     expanded.events.forEach((ev, i) => {
       const block = song.blocks[ev.blockId];
-      if (block) meta.push({ type: "lyrics", text: toAscii(chordSymbol(ev.chord, spellFor(block))), ticks: eventTicks[i] });
+      if (!block || ev.isPadding) return;
+      const text = isRest(ev.chord) ? "N.C." : toAscii(chordSymbol(ev.chord, spellFor(block)));
+      meta.push({ type: "lyrics", text, ticks: eventTicks[i] });
     });
   }
   midi.header.meta = meta.map((m, i) => ({ m, i })).sort((a, b) => a.m.ticks - b.m.ticks || a.i - b.i).map(({ m }) => m);
   midi.header.update();
 
+  const melodyChannel = opts.melodyChannel ?? 2;
   const notes = renderNotes(expanded, {
     swing: song.swing,
     fitToInstrument: false,
     humanize: false,
     channelFor: (blockId) => song.blocks[blockId]?.midiChannel ?? opts.channel,
+    melodyChannelFor: (blockId) => song.blocks[blockId]?.melodyMidiChannel ?? melodyChannel,
     // A música manda: condução de vozes e re-ataque seguem o que está salvo nela.
     voiceLeading: song.voiceLeading,
     reattack: song.reattack,
@@ -89,24 +97,40 @@ export function songToMidi(song: Song, opts: MidiExportOptions): Uint8Array {
   });
 
   const tracks = new Map<string, ReturnType<Midi["addTrack"]>>();
-  const trackFor = (bass: boolean, channel: number, bassInstrument?: string) => {
-    const program = bass && bassInstrument ? gmProgram(bassInstrument, instrumentByPatchID) : undefined;
-    const key = `${bass ? "b" : "c"}${channel}${program !== undefined ? `:${program}` : ""}`;
+  const trackFor = (kind: "melody" | "bass" | "chords", channel: number, instrumentId?: string) => {
+    const program =
+      kind === "bass"
+        ? instrumentId
+          ? gmProgram(instrumentId, instrumentByPatchID)
+          : ACOUSTIC_BASS
+        : gmProgram(instrumentId ?? (kind === "melody" ? (song.melodyInstrument ?? DEFAULT_MELODY_INSTRUMENT) : song.instrument), instrumentByPatchID);
+    const key = `${kind[0]}${channel}:${program}`;
     let t = tracks.get(key);
     if (!t) {
       t = midi.addTrack();
-      t.name = `${bass ? "Baixo" : "Acordes"}${channel !== opts.channel ? ` (ch ${channel})` : ""}`;
+      const base = kind === "melody" ? "Melodia" : kind === "bass" ? "Baixo" : "Acordes";
+      const refCh = kind === "melody" ? melodyChannel : opts.channel;
+      t.name = `${base}${channel !== refCh ? ` (ch ${channel})` : ""}`;
       t.channel = channel - 1;
-      t.instrument.number = bass ? (program ?? ACOUSTIC_BASS) : gmProgram(song.instrument, instrumentByPatchID);
+      t.instrument.number = program;
       tracks.set(key, t);
     }
     return t;
   };
 
   for (const n of notes) {
+    if (n.isMelody) {
+      trackFor("melody", n.channel, n.instrument).addNote({ midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity });
+      continue;
+    }
     // Camada de baixo (`bassInstrument`): a trilha usa o program do instrumento do bloco.
-    const layer = n.isBass ? expanded.events[n.eventIndex].bassInstrument : undefined;
-    trackFor(opts.splitBass && n.isBass, n.channel, layer).addNote({ midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity });
+    const layer = n.isBass && n.eventIndex >= 0 ? expanded.events[n.eventIndex]?.bassInstrument : undefined;
+    trackFor(opts.splitBass && n.isBass ? "bass" : "chords", n.channel, layer).addNote({
+      midi: n.midi,
+      time: n.time,
+      duration: n.duration,
+      velocity: n.velocity,
+    });
   }
   return midi.toArray();
 }

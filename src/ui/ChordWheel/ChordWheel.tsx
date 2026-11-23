@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getQuality, makeChord, type QualityId } from "../../core/chords";
+import { getQuality, isRest, makeChord, type QualityId } from "../../core/chords";
 import { nextChordSuggestions } from "../../core/analysis";
 import type { SeventhInfo } from "../../core/diatonic";
+import { melodyTargetSpan, scoreChordsForMelody, type MelodyChordMatch } from "../../core/harmonize";
 import { chordSymbol } from "../../core/modifiers";
 import { fifthsPosition, mod12, type PitchClass } from "../../core/pitch";
+import { blockMeter, expandArrangement } from "../../core/song";
+import { gridBeats } from "../../core/timeline";
 import { WHEEL_RINGS, chromaticTitle, extraQualities, hoverChordInfo, sliceClickable, shortScaleName, sliceState, wheelCounts, wheelSlices } from "../../core/view";
-import { selectEditChords, useStore } from "../../state/store";
+import { selectEditChords, selectEditMelody, useStore } from "../../state/store";
 import { previewChord, useBlock, useCtx, useSpeller } from "../hooks";
 import { spokenChord } from "../spoken";
 import { sharedPitchClasses } from "./shared";
@@ -72,10 +75,15 @@ export function ChordWheel() {
   const globalScaleId = useStore((s) => s.scaleId);
   const soundOnClick = useStore((s) => s.soundOnClick);
   const selectedChordId = useStore((s) => s.selectedChord);
+  const selectedMelodyNote = useStore((s) => s.selectedMelodyNote);
+  const grid = useStore((s) => s.grid);
   const playhead = useStore((s) => s.playhead);
+  const playScope = useStore((s) => s.playScope);
+  const selectedItem = useStore((s) => s.selectedItem);
   const song = useStore((s) => s.song);
   const block = useBlock();
   const editChords = useStore(selectEditChords);
+  const editMelody = useStore(selectEditMelody);
   const { setTonic, addChord } = useStore.getState();
   const [hover, setHover] = useState<{ root: PitchClass; quality: QualityId } | null>(null);
   const [suggest, setSuggest] = useState(true);
@@ -144,15 +152,23 @@ export function ChordWheel() {
   // A roda gira para a tônica do BLOCO selecionado (modulação) — ou a global.
   const rotation = useRotation(ctx === null ? 0 : -fifthsPosition(ctx.tonic) * 30);
 
-  // Em modo casa 2, seleção e "acorde anterior" vêm da lista em edição.
-  const selected = editChords.find((c) => c.id === selectedChordId) ?? null;
+  // Em modo casa 2, seleção e "acorde anterior" vêm da lista em edição; respiros (N.C.) não acendem Dó maior.
+  const rawSelected = editChords.find((c) => c.id === selectedChordId) ?? null;
+  const selected = rawSelected && !isRest(rawSelected) ? rawSelected : null;
   // Acorde segurado no teclado MIDI (destacado na roda).
   const live = useLiveChord().chord;
   const playing = useMemo(() => {
-    if (!playhead) return null;
+    if (!playhead || playhead.chordIndex < 0) return null;
     const item = song.arrangement[playhead.itemIndex];
-    return item ? song.blocks[item.blockId]?.chords[playhead.chordIndex] ?? null : null;
-  }, [playhead, song]);
+    const b = item ? song.blocks[item.blockId] : undefined;
+    if (!b) return null;
+    const ev =
+      playScope !== "region"
+        ? expandArrangement(song, playScope === "block" ? [selectedItem] : undefined).events[playhead.eventIndex]
+        : undefined;
+    const c = ev ? (ev.inEnding ? b.ending?.[playhead.chordIndex] : b.chords[playhead.chordIndex]) : b.chords[playhead.chordIndex];
+    return c && !isRest(c) ? c : null;
+  }, [playhead, song, playScope, selectedItem]);
 
   const previous = useMemo(() => {
     if (!editChords.length) return null;
@@ -169,6 +185,18 @@ export function ChordWheel() {
     const history = at >= 0 ? editChords.slice(0, at + 1) : editChords;
     return new Map(nextChordSuggestions(ctx, history).map((s) => [`${s.root}-${s.quality}`, s]));
   }, [suggest, ctx, block, editChords, selectedChordId]);
+
+  const melodyMatches = useMemo(() => {
+    if (!ctx || !editMelody.length) return new Map<string, MelodyChordMatch>();
+    const meter = block ? blockMeter(song, block) : song.meter;
+    const span = melodyTargetSpan(editChords, selectedChordId, editMelody, selectedMelodyNote, gridBeats(grid, meter));
+    if (!span) return new Map<string, MelodyChordMatch>();
+    return new Map(
+      scoreChordsForMelody(editMelody, span, ctx, meter, mode)
+        .slice(0, 3)
+        .map((m) => [`${m.root}-${m.quality}`, m]),
+    );
+  }, [ctx, editMelody, block, song, editChords, selectedChordId, selectedMelodyNote, grid, mode]);
 
   const activate = (root: PitchClass, quality: QualityId) => {
     // Menu radial: devolve o foco ao badge que o abriu (o menu some ao escolher).
@@ -227,6 +255,7 @@ export function ChordWheel() {
                 const isSel = selected && selected.root === root && selected.quality === ring.quality;
                 const isPlaying = playing && playing.root === root && playing.quality === ring.quality;
                 const isLive = live && live.root === root && live.quality === ring.quality;
+                const melHit = can ? melodyMatches.get(`${root}-${ring.quality}`) : undefined;
                 const sym = chordSymbol(makeChord(root, ring.quality), spell);
                 const [lx, ly] = pt((ring.r0 + ring.r1) / 2 + (roman ? 7 : 0), angle);
                 const [rx, ry] = pt((ring.r0 + ring.r1) / 2 - 13, angle);
@@ -234,7 +263,7 @@ export function ChordWheel() {
                   <g
                     key={`${ri}-${pos}`}
                     ref={(el) => void (el ? refs.current.set(`${ri}-${pos}`, el) : refs.current.delete(`${ri}-${pos}`))}
-                    className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""} ${isLive ? "live" : ""}`}
+                    className={`slice ring-${ri} ${st} ${can ? "can" : ""} ${isTonic ? "tonic" : ""} ${isSel ? "selected" : ""} ${isPlaying ? "playing" : ""} ${isLive ? "live" : ""} ${melHit ? "melody-match" : ""}`}
                     tabIndex={0}
                     role="button"
                     aria-disabled={!can}
@@ -274,6 +303,14 @@ export function ChordWheel() {
                       return (
                         <circle cx={dx} cy={dy} r={5} className="suggest-dot" opacity={0.25 + 0.75 * sg.weight}>
                           <title>{`Sugestão: ${sg.reason}`}</title>
+                        </circle>
+                      );
+                    })()}
+                    {melHit && (() => {
+                      const [mx, my] = pt(ring.r1 - 12, angle + 8);
+                      return (
+                        <circle cx={mx} cy={my} r={4} className="melody-dot">
+                          <title>{`Combina com a melodia (${Math.round(melHit.coverage * 100)}%)`}</title>
                         </circle>
                       );
                     })()}
@@ -417,7 +454,27 @@ export function DegreeStrip() {
   const ctx = useCtx();
   const spell = useSpeller();
   const soundOnClick = useStore((s) => s.soundOnClick);
+  const song = useStore((s) => s.song);
+  const block = useBlock();
+  const editChords = useStore(selectEditChords);
+  const selectedChordId = useStore((s) => s.selectedChord);
+  const editMelody = useStore(selectEditMelody);
+  const selectedMelodyNote = useStore((s) => s.selectedMelodyNote);
+  const grid = useStore((s) => s.grid);
   const { addChord } = useStore.getState();
+
+  const melodyMatches = useMemo(() => {
+    if (!ctx || !editMelody.length) return new Set<string>();
+    const meter = block ? blockMeter(song, block) : song.meter;
+    const span = melodyTargetSpan(editChords, selectedChordId, editMelody, selectedMelodyNote, gridBeats(grid, meter));
+    if (!span) return new Set<string>();
+    return new Set(
+      scoreChordsForMelody(editMelody, span, ctx, meter, "strict")
+        .slice(0, 3)
+        .map((m) => `${m.root}-${m.quality}`),
+    );
+  }, [ctx, editMelody, block, song, editChords, selectedChordId, selectedMelodyNote, grid]);
+
   if (!ctx) return null;
 
   const add = (root: PitchClass, q: QualityId) => {
@@ -436,10 +493,26 @@ export function DegreeStrip() {
       {ctx.degrees.map((d) =>
         d.primary ? (
           <div key={d.index} className="degree">
-            <button className="degree-main" onClick={() => add(d.root, d.primary!)}>
-              <span className="roman">{d.roman}</span>
-              <span>{chordSymbol(makeChord(d.root, d.primary), spell)}</span>
-            </button>
+            {(() => {
+              const melMatch = melodyMatches.has(`${d.root}-${d.primary}`);
+              return (
+                <button
+                  className={`degree-main ${melMatch ? "melody-match" : ""}`}
+                  title={melMatch ? "Combina com a melodia neste trecho" : undefined}
+                  onClick={() => add(d.root, d.primary!)}
+                >
+                  <span className="roman">
+                    {d.roman}
+                    {melMatch && (
+                      <span className="melody-badge" aria-hidden="true">
+                        ♪
+                      </span>
+                    )}
+                  </span>
+                  <span>{chordSymbol(makeChord(d.root, d.primary), spell)}</span>
+                </button>
+              );
+            })()}
             <div className="degree-alts">
               {d.qualities
                 .filter((q) => q !== d.primary && q !== "5")

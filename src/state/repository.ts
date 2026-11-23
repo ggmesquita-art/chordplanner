@@ -1,6 +1,7 @@
 // Persistência atrás de uma interface: hoje localStorage; no futuro, um backend
 // (contas/sync) pode implementar o mesmo contrato sem mexer no resto do app.
 
+import { DEFAULT_MIXER, type MixerState, type TrackMix } from "../audio/status";
 import type { AccidentalPref } from "../core/pitch";
 import type { Song } from "../core/song";
 import { GRIDS, type Grid } from "../core/timeline";
@@ -24,8 +25,14 @@ export type Session = {
   metronome: boolean;
   followScale: boolean;
   countIn?: boolean;
-  /** Grade de edição das durações (padrão: 1 tempo). */
+  /** Grade de edição das durações de acordes (padrão: compasso). */
   grid?: Grid;
+  /** Grade de edição das notas da melodia (padrão: ½ tempo). */
+  melodyGrid?: Grid;
+  /** Mostrar a faixa de melodia no dock. */
+  melodyVisible?: boolean;
+  /** Mixer ao vivo das pistas (Acordes/Baixo × Melodia). */
+  mixer?: MixerState;
   /** Mostrar a lista por graus abaixo da roda. */
   showDegrees?: boolean;
   /** Tocar o acorde ao pousar o mouse numa fatia da roda. */
@@ -36,6 +43,12 @@ export type Session = {
   topBar?: TopBarMode;
   /** Painel inferior (arranjo + progressão): completo ou compacto (sobreposto à roda). */
   dock?: DockMode;
+  /** Estado expandido/recolhido individual das camadas do Dock. */
+  dockPanels?: DockPanels;
+  /** Modo compacto do piano roll da melodia. */
+  melodyCompact?: boolean;
+  /** Ajusta automaticamente a melodia e acordes à área visível quando exceder a largura do painel. */
+  timelineFit?: boolean;
   theme?: Theme;
   midi?: MidiSettings;
   song: Song;
@@ -114,9 +127,49 @@ const SCALE_IDS = new Set(SCALES.map((s) => s.id));
 const THEMES: Theme[] = ["auto", "light", "dark"];
 export type TopBarMode = "pinned" | "auto";
 export type DockMode = "full" | "compact";
+export type DockPanels = {
+  arrangement: boolean;
+  melody: boolean;
+  progression: boolean;
+};
+export const DEFAULT_DOCK_PANELS: DockPanels = {
+  arrangement: true,
+  melody: true,
+  progression: true,
+};
 const MODES: RestrictionMode[] = ["strict", "colorful", "free"];
 const ACCIDENTALS: AccidentalPref[] = ["auto", "sharp", "flat"];
 const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
+
+function sanitizeTrackMix(raw: unknown, fallback: TrackMix): TrackMix {
+  if (typeof raw !== "object" || raw === null) return { ...fallback };
+  const r = raw as Record<string, unknown>;
+  const vol = typeof r.volume === "number" && Number.isFinite(r.volume) ? Math.max(0, Math.min(1.5, r.volume)) : fallback.volume;
+  return {
+    volume: vol,
+    muted: typeof r.muted === "boolean" ? r.muted : fallback.muted,
+    solo: typeof r.solo === "boolean" ? r.solo : fallback.solo,
+  };
+}
+
+function sanitizeMixer(raw: unknown): MixerState {
+  if (typeof raw !== "object" || raw === null) return structuredClone(DEFAULT_MIXER);
+  const r = raw as Record<string, unknown>;
+  return {
+    chords: sanitizeTrackMix(r.chords, DEFAULT_MIXER.chords),
+    melody: sanitizeTrackMix(r.melody, DEFAULT_MIXER.melody),
+  };
+}
+
+function sanitizeDockPanels(raw: unknown): DockPanels {
+  if (typeof raw !== "object" || raw === null) return { ...DEFAULT_DOCK_PANELS };
+  const r = raw as Record<string, unknown>;
+  return {
+    arrangement: bool(r.arrangement, true),
+    melody: bool(r.melody, true),
+    progression: bool(r.progression, true),
+  };
+}
 
 export class LocalSongRepository implements SongRepository {
   readonly persistent = true;
@@ -141,12 +194,18 @@ export class LocalSongRepository implements SongRepository {
         metronome: bool(p.metronome, false),
         followScale: bool(p.followScale, false),
         countIn: bool(p.countIn, false),
-        grid: GRIDS.find((g) => g === p.grid) ?? 1,
+        grid: GRIDS.find((g) => g === p.grid) ?? "bar",
+        melodyGrid: GRIDS.find((g) => g === p.melodyGrid) ?? 0.5,
+        melodyVisible: bool(p.melodyVisible, true),
+        mixer: sanitizeMixer(p.mixer),
         showDegrees: bool(p.showDegrees, true),
         soundOnHover: bool(p.soundOnHover, false),
         instrumentView: p.instrumentView === "guitar" ? "guitar" : "keyboard",
         topBar: p.topBar === "auto" ? "auto" : "pinned",
         dock: p.dock === "compact" ? "compact" : "full",
+        dockPanels: sanitizeDockPanels(p.dockPanels),
+        melodyCompact: bool(p.melodyCompact, false),
+        timelineFit: bool(p.timelineFit, false),
         theme: THEMES.find((t) => t === p.theme) ?? "auto",
         midi: typeof p.midi === "object" && p.midi !== null ? (p.midi as MidiSettings) : undefined,
         songId: typeof p.songId === "string" ? p.songId : null,

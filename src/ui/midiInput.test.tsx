@@ -22,7 +22,7 @@ import { chordSymbol } from "../core/modifiers";
 import { makeSpeller } from "../core/pitch";
 import { selectBlock, useStore } from "../state/store";
 import { LiveChordBadge } from "./LiveChord";
-import { createChordRecorder, useMidiInput } from "./useMidiInput";
+import { createChordRecorder, createMelodyRecorder, useMidiInput } from "./useMidiInput";
 
 const on = (note: number, vel = 100) => handleMidiMessage([0x90, note, vel]);
 const off = (note: number) => handleMidiMessage([0x80, note, 0]);
@@ -170,5 +170,87 @@ describe("revisão: portas, soltura forçada e realimentação", () => {
       for (const n of [60, 64, 67]) off(n);
     });
     expect(selectBlock(useStore.getState())!.chords).toHaveLength(before);
+  });
+});
+
+describe("gravação de melodia via teclado MIDI", () => {
+  it("createMelodyRecorder em melody-step avança pela grade e faz snap à escala no modo Estrito", () => {
+    const out: { pitch: number; start: number; duration: number; velocity: number }[] = [];
+    const ctx = {
+      tonic: 0,
+      scale: { id: "major", name: "Maior", family: "major-modes" as const, intervals: [0, 2, 4, 5, 7, 9, 11] },
+      pcs: [0, 2, 4, 5, 7, 9, 11],
+      pcSet: new Set([0, 2, 4, 5, 7, 9, 11]),
+      degrees: [],
+    };
+    const rec = createMelodyRecorder({
+      isRecording: () => true,
+      isPlaying: () => false,
+      getTarget: () => "melody-step",
+      getUnit: () => 0.5,
+      getMode: () => "strict",
+      getCtx: () => ctx,
+      getInitialStepBeat: () => 2,
+      getLiveBeat: () => null,
+      onNote: (n) => out.push(n),
+    });
+
+    rec.press(61, 0.8); // C#4 -> C4 (60)
+    rec.press(64, 0.9); // E4
+    expect(out).toEqual([
+      { pitch: 60, start: 2, duration: 0.5, velocity: 0.8 },
+      { pitch: 64, start: 2.5, duration: 0.5, velocity: 0.9 },
+    ]);
+  });
+
+  it("createMelodyRecorder em melody-live ignora contagem, quantiza e corta nota anterior monofonicamente", () => {
+    const out: { pitch: number; start: number; duration: number; velocity: number }[] = [];
+    let liveBeat: number | null = null;
+    const rec = createMelodyRecorder({
+      isRecording: () => true,
+      isPlaying: () => true,
+      getTarget: () => "melody-live",
+      getUnit: () => 0.5,
+      getMode: () => "colorful",
+      getCtx: () => null,
+      getInitialStepBeat: () => 0,
+      getLiveBeat: () => liveBeat,
+      onNote: (n) => out.push(n),
+    });
+
+    rec.press(60, 0.8); // ainda no count-in (beat = null): ignorado
+    expect(out).toHaveLength(0);
+
+    liveBeat = 0.08; // próximo de 0
+    rec.press(60, 0.75);
+    liveBeat = 1.48; // 1.5 -> força corte da nota 60 e abre 64 em 1.5
+    rec.press(64, 0.85);
+    liveBeat = 2.6; // ~1 tempo depois
+    rec.release(64);
+    expect(out).toEqual([
+      { pitch: 60, start: 0, duration: 1.5, velocity: 0.75 },
+      { pitch: 64, start: 1.5, duration: 1, velocity: 0.85 },
+    ]);
+  });
+
+  it("useMidiInput integrado grava melodia passo a passo e mostra selo correspondente", () => {
+    useStore.getState().setMode("colorful");
+    useStore.getState().setMelodyGrid(0.5);
+    useStore.getState().setMidi({ inputRecord: true, inputRecordTarget: "melody-step" });
+    render(<Host />);
+    expect(screen.getByRole("group", { name: "Acorde no teclado MIDI" }).textContent).toContain("melodia (passo)");
+
+    act(() => {
+      on(60, 100);
+      off(60);
+      on(62, 100);
+      off(62);
+    });
+    expect(vi.mocked(liveNoteOn)).toHaveBeenCalledWith(60, 100 / 127, expect.any(String), { track: "melody", channel: 2 });
+    const mel = selectBlock(useStore.getState())!.melody ?? [];
+    expect(mel.map((n) => [n.pitch, n.start, n.duration])).toEqual([
+      [60, 0, 0.5],
+      [62, 0.5, 0.5],
+    ]);
   });
 });

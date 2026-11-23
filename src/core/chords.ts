@@ -41,11 +41,19 @@ export type Chord = {
   octave?: number;
   /** Duração em tempos. */
   duration: number;
+  /** Acorde ausente / respiro (N.C.): silêncio harmônico mantendo a grade e o metrônomo. */
+  rest?: true;
 };
+
+export const isRest = (chord: Pick<Chord, "rest"> | null | undefined): boolean => !!chord?.rest;
 
 let counter = 0;
 export const newChordId = () => `c${Date.now().toString(36)}${(counter++).toString(36)}`;
 
 export function makeChord(root: PitchClass, quality: QualityId, duration = 4): Chord {
   return { id: newChordId(), root, quality, modifiers: [], duration };
+}
+
+export function makeRest(duration = 4): Chord {
+  return { id: newChordId(), root: 0, quality: "maj", modifiers: [], duration, rest: true };
 }

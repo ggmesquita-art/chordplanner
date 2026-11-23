@@ -6,7 +6,7 @@ import * as Tone from "tone";
 import { okOnlyCache, type SampleStorage } from "./sampleCache";
 import { ElectricPiano, Mallet, Smolken, Soundfont, SplendidGrandPiano, Versilian } from "smplr";
 import { getInstrumentDef, type InstrumentDef, type SmplrSource, type SynthPreset } from "./instruments";
-import { clearProgress, clearStatus, pickEviction, reportProgress, setStatus } from "./status";
+import { clearProgress, clearStatus, computeTrackGain, getMixState, pickEviction, reportProgress, setMixState, setStatus, subscribeMix, type MixerState, type TrackBus } from "./status";
 
 export { pickEviction };
 
@@ -21,7 +21,7 @@ type RawVoice = {
 export type Voice = RawVoice;
 
 /** Limite de instrumentos sampleados em memória; synths têm teto próprio (são leves). */
-export const MAX_SAMPLED = 6;
+export const MAX_SAMPLED = 8;
 const MAX_SYNTHS = 8;
 /** Sem resposta dos samples neste prazo, o carregamento conta como erro (cai no plano B/synth). */
 export const LOAD_TIMEOUT_MS = 20_000;
@@ -51,6 +51,32 @@ export function limiterInput(): Tone.ToneAudioNode {
   return limiterNode!;
 }
 
+const busNodes: Partial<Record<TrackBus, Tone.Gain>> = {};
+
+export function trackEffectiveGain(track: TrackBus): number {
+  return computeTrackGain(getMixState(), track);
+}
+
+function applyBusGains(mix: MixerState) {
+  for (const track of ["chords", "melody"] as const) {
+    const node = busNodes[track];
+    if (node) node.gain.rampTo(computeTrackGain(mix, track), 0.02);
+  }
+}
+
+subscribeMix(applyBusGains);
+
+function trackOutput(track: TrackBus = "chords"): Tone.Gain {
+  if (!busNodes[track]) {
+    busNodes[track] = new Tone.Gain(trackEffectiveGain(track)).connect(output());
+  }
+  return busNodes[track]!;
+}
+
+export function setTrackMix(mix: MixerState) {
+  setMixState(mix);
+}
+
 // ——— Instrumentos —————————————————————————————————————————————————————
 
 const shifted = (notes: string[], shift?: number) => (shift ? notes.map((n) => Tone.Frequency(n).transpose(shift).toNote()) : notes);
@@ -71,12 +97,12 @@ type Wire = <T extends Tone.PolySynth>(synth: T, ...effects: Fx[]) => T;
 const chorus = (frequency = 1.2, depth = 0.5, wet = 0.4) => new Tone.Chorus({ frequency, delayTime: 3.5, depth, spread: 180, wet });
 
 /** Cria o synth e devolve a voz com `dispose` (solta notas e descarta synths e efeitos). */
-function createSynth(preset: SynthPreset): Voice & { dispose: () => void } {
+function createSynth(preset: SynthPreset, track: TrackBus = "chords"): Voice & { dispose: () => void } {
   const nodes: Fx[] = [];
-  // Liga o synth numa cadeia de efeitos até o master. Efeitos com LFO já saem ligados.
+  // Liga o synth numa cadeia de efeitos até o bus da pista. Efeitos com LFO já saem ligados.
   const fx: Wire = (synth, ...effects) => {
     for (const e of effects) if ("start" in e && typeof e.start === "function") (e as unknown as { start: () => void }).start();
-    synth.chain(...effects, output());
+    synth.chain(...effects, trackOutput(track));
     nodes.push(synth, ...effects);
     return synth;
   };
@@ -236,6 +262,7 @@ type SmplrInstrument = ReturnType<typeof Soundfont>;
 
 type Loaded = {
   id: string;
+  instId: string;
   voice: Voice;
   sampled: boolean;
   lastUsed: number;
@@ -262,7 +289,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /** Plano B: banco FluidR3 em mp3, carregado pelo Tone.Sampler. */
-function loadGmSampler(def: InstrumentDef, entry: Loaded) {
+function loadGmSampler(def: InstrumentDef, entry: Loaded, track: TrackBus) {
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const fail = () => {
@@ -271,7 +298,7 @@ function loadGmSampler(def: InstrumentDef, entry: Loaded) {
     clearTimeout(timer);
     entry.release?.();
     entry.release = undefined;
-    setStatus(entry.id, "error");
+    setStatus(entry.instId, "error");
   };
   const sampler = new Tone.Sampler({
     urls: sampleUrls(def),
@@ -283,10 +310,10 @@ function loadGmSampler(def: InstrumentDef, entry: Loaded) {
       settled = true;
       clearTimeout(timer);
       entry.voice = sampler;
-      setStatus(entry.id, "ready");
+      setStatus(entry.instId, "ready");
     },
     onerror: fail,
-  }).connect(output());
+  }).connect(trackOutput(track));
   entry.release = () => {
     settled = true;
     clearTimeout(timer);
@@ -295,15 +322,15 @@ function loadGmSampler(def: InstrumentDef, entry: Loaded) {
   timer = setTimeout(fail, LOAD_TIMEOUT_MS);
 }
 
-let smplrSink: AudioNode | null = null;
-/** Entrada nativa ligada ao bus master do Tone: os samples do smplr passam pelo mesmo EQ/comp/reverb. */
-function sink(): AudioNode {
-  if (!smplrSink) {
+const smplrSinks: Partial<Record<TrackBus, AudioNode>> = {};
+/** Entrada nativa ligada ao bus da pista no Tone: os samples do smplr passam pelo ganho de pista + EQ/comp/reverb. */
+function sink(track: TrackBus = "chords"): AudioNode {
+  if (!smplrSinks[track]) {
     const gain = Tone.getContext().createGain();
-    Tone.connect(gain, output());
-    smplrSink = gain as unknown as AudioNode;
+    Tone.connect(gain, trackOutput(track));
+    smplrSinks[track] = gain as unknown as AudioNode;
   }
-  return smplrSink;
+  return smplrSinks[track]!;
 }
 
 let storage: SampleStorage | null | undefined;
@@ -319,10 +346,10 @@ function sampleStorage(): SampleStorage | undefined {
   return storage ?? undefined;
 }
 
-function createSmplr(src: SmplrSource, onLoadProgress: (p: { loaded: number; total: number }) => void): SmplrInstrument {
+function createSmplr(src: SmplrSource, onLoadProgress: (p: { loaded: number; total: number }) => void, track: TrackBus): SmplrInstrument {
   // Mesmo AudioContext do Tone: os tempos do Transport valem para o smplr.
   const ctx = Tone.getContext().rawContext as unknown as AudioContext;
-  const common = { destination: sink(), storage: sampleStorage(), onLoadProgress };
+  const common = { destination: sink(track), storage: sampleStorage(), onLoadProgress };
   switch (src.kind) {
     case "grand-piano":
       return SplendidGrandPiano(ctx, { ...common, decayTime: 0.6 });
@@ -370,14 +397,15 @@ function smplrVoice(inst: SmplrInstrument): Voice {
 
 const loaded = new Map<string, Loaded>();
 
-let fallbackVoice: Voice | null = null;
-/** Synth que toca no lugar de um instrumento ainda carregando (ou que falhou). Compartilhado e permanente. */
-export const fallback = (): Voice => (fallbackVoice ??= createSynth("poly"));
+const fallbackVoices: Partial<Record<TrackBus, Voice>> = {};
+/** Synth que toca no lugar de um instrumento ainda carregando (ou que falhou). Compartilhado por pista. */
+export const fallback = (track: TrackBus = "chords"): Voice => (fallbackVoices[track] ??= createSynth("poly", track));
 
 /** Solta as notas de todos os instrumentos carregados (e do synth de reserva). */
 export function releaseAllVoices() {
   loaded.forEach((l) => l.voice.releaseAll());
-  fallbackVoice?.releaseAll();
+  fallbackVoices.chords?.releaseAll();
+  fallbackVoices.melody?.releaseAll();
 }
 
 // ——— Descarte (LRU) ———
@@ -388,19 +416,24 @@ let previewId: string | null = null;
 export const pinPlaying = (ids: Iterable<string>) => void (playingIds = new Set(ids));
 export const pinPreview = (id: string | null) => void (previewId = id);
 
-/** Descarta um instrumento: solta as notas e libera nós/instância; um novo uso recarrega (samples vêm do cache). */
-export function disposeInstrument(id: string) {
-  const entry = loaded.get(id);
+function disposeKey(key: string) {
+  const entry = loaded.get(key);
   if (!entry) return;
   entry.disposed = true;
-  loaded.delete(id);
+  loaded.delete(key);
   try {
     entry.release?.();
   } catch (err) {
-    console.warn(`falha ao descartar ${id}`, err);
+    console.warn(`falha ao descartar ${key}`, err);
   }
   entry.release = undefined;
-  clearStatus(id);
+  if (![...loaded.values()].some((e) => e.instId === entry.instId)) clearStatus(entry.instId);
+}
+
+/** Descarta um instrumento (e sua cópia na pista de melodia, se houver): solta as notas e libera nós/instância. */
+export function disposeInstrument(id: string) {
+  disposeKey(id);
+  if (!id.startsWith("melody:")) disposeKey(`melody:${id}`);
 }
 
 function evictExcess(keep: string) {
@@ -414,30 +447,33 @@ function evictExcess(keep: string) {
     inUse,
     MAX_SYNTHS,
   );
-  [...sampled, ...synths].forEach(disposeInstrument);
+  [...sampled, ...synths].forEach(disposeKey);
 }
 
 let clock = 0;
 
-export function ensureInstrument(id: string): Loaded {
-  const existing = loaded.get(id);
+export const instrumentCacheKey = (id: string, track: TrackBus = "chords") => (track === "chords" ? id : `melody:${id}`);
+
+export function ensureInstrument(id: string, track: TrackBus = "chords"): Loaded {
+  const key = instrumentCacheKey(id, track);
+  const existing = loaded.get(key);
   if (existing) {
     existing.lastUsed = ++clock;
     return existing;
   }
   const def = getInstrumentDef(id);
   if (def.engine === "synth") {
-    const voice = createSynth(def.source.preset ?? "poly");
-    const entry: Loaded = { id, voice, sampled: false, lastUsed: ++clock, disposed: false, release: voice.dispose };
-    loaded.set(id, entry);
-    evictExcess(id);
+    const voice = createSynth(def.source.preset ?? "poly", track);
+    const entry: Loaded = { id: key, instId: id, voice, sampled: false, lastUsed: ++clock, disposed: false, release: voice.dispose };
+    loaded.set(key, entry);
+    evictExcess(key);
     setStatus(id, "ready");
     return entry;
   }
   // Enquanto os samples carregam, um synth toca no lugar.
-  const entry: Loaded = { id, voice: fallback(), sampled: true, lastUsed: ++clock, disposed: false };
-  loaded.set(id, entry);
-  evictExcess(id);
+  const entry: Loaded = { id: key, instId: id, voice: fallback(track), sampled: true, lastUsed: ++clock, disposed: false };
+  loaded.set(key, entry);
+  evictExcess(key);
   setStatus(id, "loading");
 
   // Progresso do smplr só vale enquanto ele é a tentativa em curso (callbacks tardios são ignorados).
@@ -448,7 +484,7 @@ export function ensureInstrument(id: string): Loaded {
     clearProgress(id);
     entry.release?.(); // descarta a instância do smplr que falhou
     entry.release = undefined;
-    if (def.source.gm) loadGmSampler(def, entry);
+    if (def.source.gm) loadGmSampler(def, entry, track);
     else setStatus(id, "error");
   };
   if (!def.source.smplr) {
@@ -456,7 +492,7 @@ export function ensureInstrument(id: string): Loaded {
     return entry;
   }
   try {
-    const inst = createSmplr(def.source.smplr, (p) => void (smplrActive && reportProgress(id, p)));
+    const inst = createSmplr(def.source.smplr, (p) => void (smplrActive && reportProgress(id, p)), track);
     entry.release = () => inst.dispose();
     withTimeout(inst.ready, LOAD_TIMEOUT_MS).then(
       () => {

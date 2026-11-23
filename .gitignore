@@ -30,3 +30,15 @@ graphify-out/
 # App de desktop: instaladores e samples espelhados
 release/
 desktop-samples/
+
+# Node.js portátil do projeto (scripts/env.ps1)
+.tools/
+
+# Módulo Python IA (pesos e ambientes virtuais nunca vão para o git)
+.venv/
+.venv_ai/
+models/
+__pycache__/
+*.pyc
+.pytest_cache/
+music-composition/

@@ -1,19 +1,21 @@
 # ChordPlanner — Roadmap final
 
-> Criado em 13/11/2026 a partir da revisão do código contra o [`DESIGN.md`](DESIGN.md); atualizado em 18/11/2026 com o roadmap concluído.
-> As seções (§) referem-se ao `DESIGN.md`. Este arquivo substitui o roadmap do §9 como lista de trabalho.
+> Criado em 13/11/2026 a partir da revisão do código contra o [`DESIGN.md`](DESIGN.md); atualizado em 18/11/2026 com a v1–v3 concluída e em 21/11/2026 com o planejamento da Etapa 6 (v4 — Camada de Melodia, Acordes Curtos e Respiro/N.C.).
+> As seções (§) referem-se ao `DESIGN.md`. Este arquivo substitui o roadmap do §9 como lista de trabalho. Para ideias e expansões pós-v4, veja [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).
 
 ## Onde o projeto está
 
-- **MVP, v1, v2 e v3: concluídos.** Todos os itens das Etapas 1 a 5 abaixo estão feitos.
+- **MVP, v1, v2, v3 e v4 (Etapas 1 a 6): concluídos.**
+- **Expansões futuras (pós-v4):** catalogadas em [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
-- **Saúde:** typecheck, lint e build limpos; 431 testes passando.
+- **Saúde:** typecheck, lint e build limpos; 489 testes passando (Etapa 6 concluída em 21/11/2026).
 
-### Entregue depois do roadmap (18/11/2026)
+### Entregue depois do roadmap (18/11/2026 – 21/11/2026)
 
 - Layout em tela cheia: topo fixo ou automático (faixa fina que abre ao passar o mouse) e painel inferior completo ou compacto, sobreposto à roda, acompanhando a reprodução.
 - Exportação para DAW e partitura num menu único: MIDI com nomes dos acordes, MusicXML (valida no XSD 4.0), ABC e ChordPro.
 - App de desktop para macOS (Electron) com todos os samples embutidos, offline desde a instalação, Web MIDI liberado.
+- Build de desktop para Windows (`npm run app:dist:win`): instalador NSIS x64 em `package.json` e ambiente portátil com Node.js por projeto em [`scripts/env.ps1`](scripts/env.ps1).
 - Teclado MIDI: reconhece o acorde tocado (nome, grau, destaque na roda), toca com o instrumento atual (com pedal) e grava a progressão ao soltar as teclas.
 - Cache de samples só guarda respostas válidas (antes um 503 passageiro do servidor ficava guardado para sempre e a nota emudecia).
 
@@ -123,6 +125,54 @@ Ordem sugerida: os dois primeiros itens destravam os demais.
 - [x] Visualização de braço de violão (Teclado | Violão no painel de modificadores), com digitação tocável calculada em `core/fretboard.ts`.
 - [x] Modo prática: cadência + acorde, responder o grau (Básico ou Todos os graus), com placar.
 - [x] PWA offline: manifest, ícones e service worker gerado no build; o app abre sem rede depois da primeira visita (samples só os já baixados).
+
+## Etapa 6 — v4: Camada de Melodia, Acordes Curtos e Respiro (N.C.)
+
+### Especificação fechada (21/11/2026)
+
+- **3 camadas no Dock:** Arranjo (blocos) → Melodia (nova) → Acordes (atualizada), com divisor vertical arrastável entre Roda e Dock e botão para recolher/focar a Melodia.
+- **Visualização da Melodia:** piano roll compacto dobrado na escala em `Estrito` (só notas da escala + linha de aviso quando houver nota fora) e cromático destacando a escala em `Colorido`/`Livre`; janela padrão `C4–C6` com scroll vertical até `C2–C7`.
+- **Alinhamento & Playhead:** mesma escala horizontal (`px/tempo`), zoom horizontal, régua de compassos única, scroll horizontal acoplado e agulha vertical contínua de playhead atravessando Melodia e Acordes.
+- **Modelo da Melodia:** monofônica (`melody?: MelodyNote[]` dentro de `Block`, `{ id, pitch, start, duration, velocity? }`; sobreposição substitui ou encurta a nota anterior), com suporte a Casa 2 (`melodyEnding`).
+- **Fluxo "Melodia primeiro":** duração do bloco desacoplada dos acordes (`max(acordes, melodia)`), permitindo criar e tocar blocos só com melodia antes de harmonizar.
+- **Grades & Durações:** grades independentes (Melodia e Acordes) indo até `¼` tempo (`0.25`, semicolcheia em potências de 2, sem tercinas, mantendo `DIV_PER_WHOLE = 64`); acorde novo nasce com a duração da grade de acordes ativa.
+- **Respiro / Ausente (`N.C.`):** item explícito de pausa na pista de acordes, botão/atalho `+ Respiro (N.C.)`, e clique em tempo vazio sob a melodia preenchendo automaticamente a lacuna anterior com `N.C.`.
+- **Troca de tônica / escala:** trocar tônica transpõe a melodia junto (menor salto de oitava); trocar escala preserva notas, sinaliza notas fora com `⚠` e oferece botão "Ajustar à escala".
+- **Entrada da Melodia:** clique/arraste por mouse/teclado na grade (altura, duração, preview sonoro, apagar) + teclado MIDI em modo passo-a-passo e gravação em tempo real (com count-in, metrônomo e quantização).
+- **Inteligência Melodia ↔ Roda:** coloração das notas da melodia em relação ao acorde abaixo (nota do acorde / tensão / passagem / `N.C.`), destaque na `ChordWheel` e `DegreeStrip` dos acordes compatíveis no tempo selecionado e botão **"Auto-harmonizar"** (usando a grade de acordes como ritmo harmônico, pontuando tempos fortes + fluxo funcional `T`/`SD`/`D`, com opções "Preencher vazios" ou "Substituir tudo" e Desfazer).
+- **Áudio & Mixagem:** `melodyInstrument` (global + override por bloco), controles Mute/Solo/Volume ao vivo separados (`Melodia` × `Acordes/Baixo`), canal MIDI próprio para Melodia e proteção contra corte de nota repetida no mesmo timbre. No `N.C.`, acordes e baixo silenciam, `voiceLeading` preserva a referência anterior, bordão (`drone`) continua soando e metrônomo segue clicando; clamp de `strum`/`arp`/`comping` em acordes `< 0.5` tempo.
+- **Exportação & Migração:** schema `v1 → v2` retrocompatível (`localStorage`, `.json`, `#s=`), MIDI com trilha/canal de Melodia, MusicXML com 3 partes (`P1` Melodia, `P2` Acordes, `P3` Baixo), ABC com 3 vozes, ChordPro e Texto com `N.C.`.
+
+### Fase 6.1 — Núcleo, Schema (`v1 → v2`) e Motor de Áudio (`src/core/`, `src/state/`, `src/audio/`, `src/export/migrate|json|url`)
+
+- [x] Definir `MelodyNote` (`{ id, pitch, start, duration, velocity? }`), `melody` e `melodyEnding` em `Block` (`src/core/song.ts`), mantendo regra monofônica sem sobreposição.
+- [x] Adicionar representação explícita de pausa (`N.C.`) em `Chord` (`src/core/chords.ts`) e proteger `voicing.ts`, `diatonic.ts`, `analysis.ts`, `modifiers.ts` e `view.ts` contra itens sem fundamental/qualidade.
+- [x] Ampliar `GRIDS` (`src/core/timeline.ts`) para incluir `0.25` tempo (`¼` / semicolcheia) e ajustar piso mínimo de `setDuration` (`src/state/store.ts`).
+- [x] Desacoplar duração do bloco em `expandArrangement`/`expandRegion` (`src/core/song.ts`) usando `max(acordes, melodia)`, inclusive para blocos sem acordes e corte de Casa 2 (`endingCut`).
+- [x] Atualizar `src/state/store.ts`: ações de CRUD de notas da melodia (com undo/redo), `melodyInstrument` (global e por bloco), transposição de melodia em `setTonic` (menor salto de oitava), sinalização e ação "Ajustar à escala", `addChord` usando duração da grade ativa, inserção de `N.C.` (manual e automática em lacunas), e `contentHash` atualizado.
+- [x] Implementar migração `v1 → v2` em `src/export/migrate.ts` e validação/saneamento em `src/export/json.ts`, `src/export/url.ts` e `src/state/repository.ts` mantendo retrocompatibilidade com sessões, `.json` e links `#s=` antigos.
+- [x] Atualizar `src/audio/render.ts`, `src/audio/loaders.ts`, `src/audio/player.ts`, `src/audio/engine.ts` e `src/audio/midi.ts`: renderizar eventos de melodia (com swing e `melodyEnding`), criar buses/gains separados (`Melodia` × `Acordes/Baixo`) para Mute/Solo/Volume ao vivo, isolar canal MIDI da melodia, evitar corte de nota repetida no mesmo timbre, tratar `N.C.` (`voiceLeading` preservado, `drone` contínuo, metrônomo ativo) e limitar `strum`/`arp`/`comping` para não vazarem em acordes `< 0.5` tempo.
+
+### Fase 6.2 — Interface das 3 Camadas Alinhadas (`src/ui/`)
+
+- [x] Reestruturar o `Dock` (`src/ui/Layout/Dock.tsx`) para 3 faixas (Arranjo → Melodia → Acordes) com divisor vertical arrastável entre a Roda e o Dock e botão recolher/focar Melodia.
+- [x] Construir componente da pista **Melodia**: piano roll compacto dobrado na escala em `Estrito` (com faixa de aviso para notas fora) e cromático com destaque da escala em `Colorido`/`Livre`, janela padrão `C4–C6` com scroll vertical `C2–C7`.
+- [x] Implementar edição completa na grade de melodia (clique para inserir/apagar, arraste vertical de altura e horizontal de duração com `snapDuration`, preview sonoro, seleção e atalhos de teclado) + seletor de grade própria, seletor de `melodyInstrument`, controles Mute/Solo/Volume ao vivo e botão "Ajustar à escala".
+- [x] Sincronizar escala horizontal (`px/tempo`), zoom horizontal, régua de compassos única, scroll horizontal acoplado e agulha vertical contínua de playhead entre Melodia e Acordes.
+- [x] Atualizar a faixa de **Acordes** (`src/ui/Progression/Progression.tsx`): remover piso fixo incompatível de `88px` para respeitar o alinhamento proporcional, adicionar `¼ tempo` na grade, botão/atalho `+ Respiro (N.C.)`, criação de `N.C.` automático ao preencher lacuna sob a melodia e atualização do `ResizeHandle` para `0.25`.
+
+### Fase 6.3 — Inteligência Harmônica & Gravação MIDI (`src/core/harmonize.ts`, `src/ui/`)
+
+- [x] Criar funções puras em `src/core/harmonize.ts` para classificar notas da melodia frente ao acorde subjacente (nota do acorde / tensão / passagem / `N.C.`) e colorir os blocos no piano roll.
+- [x] Pontuar compatibilidade dos acordes com a melodia no trecho/cursor selecionado e destacar os candidatos na `ChordWheel` (`src/ui/ChordWheel/ChordWheel.tsx`) e `DegreeStrip`.
+- [x] Implementar algoritmo e botão **"Auto-harmonizar"** usando a grade de acordes ativa como ritmo harmônico, pontuando notas de tempo forte + fluxo funcional (`T`/`SD`/`D`) e deixando trechos vazios como sustentação ou `N.C.`, com escolha entre "Preencher vazios" e "Substituir tudo" (reversível com Desfazer).
+- [x] Adicionar gravação de melodia pelo teclado MIDI (`src/ui/useMidiInput.ts` + `src/ui/Transport/MidiPanel.tsx`, sincronizada com o relógio de áudio via `getPlaybackTime()`): seletor de destino `Acordes | Melodia (passo a passo / tempo real)`, canal MIDI da melodia, count-in, metrônomo e quantização na grade da melodia.
+
+### Fase 6.4 — Exportadores Completos & Verificação (`src/core/notation.ts`, `src/export/`)
+
+- [x] Adicionar grafia enarmônica de melodia orientada por escala/armadura em `src/core/notation.ts` e estender `buildSegments` para transportar melodia, `melodyEnding` e `N.C.`.
+- [x] Atualizar `src/export/midi.ts` (trilha/canal próprio para Melodia), `src/export/musicxml.ts` (3 partes quando há melodia: `P1` Melodia em Sol, `P2` Acordes, `P3` Baixo em Fá; `<harmony>` e pausas), `src/export/abc.ts` (`V:1` Melodia, `V:2` Acordes, `V:3` Baixo) e `src/export/chordpro.ts` / `src/export/text.ts` (emissão explícita de `[N.C.]` / `N.C.` em pausas).
+- [x] Cobrir todas as novas funções e regressões com testes unitários/integração e validar `tsc -b`, `oxlint`, `vitest run` e `vite build`.
 
 ---
 

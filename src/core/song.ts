@@ -1,7 +1,8 @@
 // Blocos e arranjo (DESIGN §3.8). `expandArrangement` desenrola repetições em
 // eventos com posição absoluta — consumido pelo áudio, pela régua e pelo export.
 
-import type { Chord } from "./chords";
+import { makeRest, type Chord } from "./chords";
+import { DEFAULT_MELODY_INSTRUMENT, melodyEndBeat, sliceMelodyForPass, type MelodyNote } from "./melody";
 import { missingBeats, rampBpmAt, rampSeconds, secondsPerBeat, type Meter } from "./timeline";
 
 export type PlaybackPattern = "block" | "arp-up" | "arp-down" | "comping";
@@ -13,6 +14,14 @@ export type Block = {
   name: string;
   color: string;
   chords: Chord[];
+  /** Melodia monofônica opcional do bloco (§Etapa 6 / v4). */
+  melody?: MelodyNote[];
+  /** Melodia da casa 2 (§Etapa 6 / v4): substitui o último compasso da melodia na última repetição com ×2+. */
+  melodyEnding?: MelodyNote[];
+  /** Timbre próprio da melodia neste bloco (override do global). */
+  melodyInstrument?: InstrumentId;
+  /** Canal MIDI 1–16 da melodia neste bloco (override do global). */
+  melodyMidiChannel?: number;
   bpm?: number;
   meter?: Meter;
   pattern?: PlaybackPattern;
@@ -41,6 +50,8 @@ export type Song = {
   meter: Meter;
   swing: number;
   instrument: InstrumentId;
+  /** Timbre global da pista de melodia (padrão: `epiano`). */
+  melodyInstrument?: InstrumentId;
   pattern: PlaybackPattern;
   /** Escolhe a inversão de cada acorde com menor movimento em relação ao anterior (§5.1). */
   voiceLeading?: boolean;
@@ -74,6 +85,26 @@ export type TimedChord = {
   drone?: boolean;
   /** Evento da casa 2: `chordIndex` indexa `block.ending`, não `block.chords`. */
   inEnding?: boolean;
+  /** Em passadas com `melodyEnding`, tempo no bloco a partir do qual toca a melodia da casa 2. */
+  melodyEndingFrom?: number;
+  /** Evento silencioso sintético que preenche o trecho onde a melodia ultrapassa os acordes do bloco. */
+  isPadding?: boolean;
+};
+
+export type TimedMelodyNote = {
+  note: MelodyNote;
+  blockId: string;
+  itemIndex: number;
+  repetition: number;
+  startBeat: number;
+  blockBeat: number;
+  beats: number;
+  startSec: number;
+  durationSec: number;
+  bpm: number;
+  meter: Meter;
+  instrument: InstrumentId;
+  inEnding?: boolean;
 };
 
 export type Marker = {
@@ -94,6 +125,7 @@ export type TempoPoint = { startSec: number; bpm: number; meter: Meter; startBea
 
 export type Expanded = {
   events: TimedChord[];
+  melodyEvents: TimedMelodyNote[];
   markers: Marker[];
   tempoMap: TempoPoint[];
   totalSec: number;
@@ -102,7 +134,8 @@ export type Expanded = {
 
 export const BLOCK_COLORS = ["#6c8cff", "#ff8a5b", "#4fd1a5", "#e36bd6", "#f5c542", "#58c4e6", "#a98bff", "#ff6b81"];
 
-export const blockBeats = (b: Block) => b.chords.reduce((sum, c) => sum + c.duration, 0);
+export const blockChordBeats = (b: Block) => b.chords.reduce((sum, c) => sum + c.duration, 0);
+export const blockBeats = (b: Block) => Math.max(blockChordBeats(b), melodyEndBeat(b.melody));
 export const blockMeter = (song: Song, b: Block): Meter => b.meter ?? song.meter;
 export const blockBpm = (song: Song, b: Block) => b.bpm ?? song.bpm;
 
@@ -114,19 +147,34 @@ export function blockIsIncomplete(song: Song, b: Block): number {
  * Posição (em tempos, dentro da passada) onde começa o "último compasso" do bloco, o trecho que a casa 2
  * substitui: o início do último compasso da grade, ou seja floor((total − ε) / tempos-por-compasso) · tempos-por-compasso.
  * Em bloco incompleto é o trecho final a partir da última barra (ex.: 18 tempos em 4/4 → 16..18).
- * Acordes que atravessam esse ponto são cortados nele.
+ * Acordes e notas que atravessam esse ponto são cortados nele.
  */
 export function endingCut(block: Block, meter: Meter): number {
   return Math.max(0, Math.floor((blockBeats(block) - 1e-9) / meter[0]) * meter[0]);
 }
 
-type Acc = { events: TimedChord[]; markers: Marker[]; tempoMap: TempoPoint[]; sec: number; beatAbs: number; bars: number };
+type Acc = {
+  events: TimedChord[];
+  melodyEvents: TimedMelodyNote[];
+  markers: Marker[];
+  tempoMap: TempoPoint[];
+  sec: number;
+  beatAbs: number;
+  bars: number;
+};
 
-const newAcc = (): Acc => ({ events: [], markers: [], tempoMap: [], sec: 0, beatAbs: 0, bars: 0 });
+const newAcc = (): Acc => ({ events: [], melodyEvents: [], markers: [], tempoMap: [], sec: 0, beatAbs: 0, bars: 0 });
 
-const finish = (a: Acc): Expanded => ({ events: a.events, markers: a.markers, tempoMap: a.tempoMap, totalSec: a.sec, totalBars: a.bars });
+const finish = (a: Acc): Expanded => ({
+  events: a.events,
+  melodyEvents: a.melodyEvents,
+  markers: a.markers,
+  tempoMap: a.tempoMap,
+  totalSec: a.sec,
+  totalBars: a.bars,
+});
 
-/** Acrescenta ao acumulador `repeat` passadas dos acordes `from..to` (índices reais) do bloco do item. */
+/** Acrescenta ao acumulador `repeat` passadas do bloco do item (acordes `from..to` + melodia da faixa). */
 function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from = 0, to = Infinity) {
   const block = song.blocks[song.arrangement[itemIndex]?.blockId];
   if (!block) return;
@@ -139,6 +187,8 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
     a.tempoMap.push({ startSec: a.sec, bpm, meter, startBeat: a.beatAbs });
   }
   a.markers.push({ itemIndex, blockId: block.id, name: block.name, startSec: a.sec, startBar: a.bars, bpm, meter });
+
+  const isRegion = from > 0 || to < Infinity;
   // Região da passada que será emitida (acordes from..to).
   let regionStart = Infinity;
   let regionEnd = 0;
@@ -150,14 +200,18 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
     }
     p += c.duration;
   });
+  const baseBeat = isRegion ? regionStart : 0;
 
   // Casa 2: só na instância inteira (não em região) com ×2 ou mais.
-  const ending = from === 0 && to === Infinity && repeat >= 2 && block.ending?.length ? block.ending : undefined;
+  const canEnding = !isRegion && repeat >= 2;
+  const chordEnding = canEnding && block.ending?.length ? block.ending : undefined;
+  const hasMelodyEnding = canEnding && block.melodyEnding !== undefined;
   const cut = endingCut(block, meter);
+  const melodyInst = block.melodyInstrument ?? song.melodyInstrument ?? DEFAULT_MELODY_INSTRUMENT;
 
-  type Piece = { chord: Chord; chordIndex: number; blockBeat: number; beats: number; inEnding: boolean };
+  type Piece = { chord: Chord; chordIndex: number; blockBeat: number; beats: number; inEnding: boolean; isPadding?: boolean };
   for (let rep = 0; rep < repeat; rep++) {
-    const withEnding = !!ending && rep === repeat - 1;
+    const withEnding = (!!chordEnding || hasMelodyEnding) && rep === repeat - 1;
     // Peças da passada: os acordes do bloco; na última passada com casa 2, o último compasso é trocado.
     const pieces: Piece[] = [];
     let pos = 0;
@@ -165,32 +219,70 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
       const blockBeat = pos;
       pos += chord.duration;
       if (chordIndex < from || chordIndex > to) return;
-      if (withEnding && blockBeat >= cut - 1e-9) return;
-      const beats = withEnding ? Math.min(chord.duration, cut - blockBeat) : chord.duration;
+      if (withEnding && chordEnding && blockBeat >= cut - 1e-9) return;
+      const beats = withEnding && chordEnding ? Math.min(chord.duration, cut - blockBeat) : chord.duration;
       pieces.push({ chord, chordIndex, blockBeat, beats, inEnding: false });
     });
-    let passEnd = regionEnd;
-    if (withEnding) {
+    let chordsEnd = isRegion ? regionEnd : blockChordBeats(block);
+    if (withEnding && chordEnding) {
       let q = cut;
-      ending!.forEach((chord, chordIndex) => {
+      chordEnding.forEach((chord, chordIndex) => {
         pieces.push({ chord, chordIndex, blockBeat: q, beats: chord.duration, inEnding: true });
         q += chord.duration;
       });
-      passEnd = q;
+      chordsEnd = q;
     }
+
+    type MelItem = { note: MelodyNote; inEnding: boolean };
+    let passMelody: MelItem[] = [];
+    if (isRegion) {
+      if (regionStart < regionEnd) {
+        passMelody = sliceMelodyForPass(block.melody ?? [], regionStart, regionEnd).map((note) => ({ note, inEnding: false }));
+      }
+    } else if (withEnding && hasMelodyEnding) {
+      const mainPart = sliceMelodyForPass(block.melody ?? [], 0, cut).map((note) => ({ note, inEnding: false }));
+      const endPart = (block.melodyEnding ?? []).map((n) => ({
+        note: { ...n, start: n.start + cut },
+        inEnding: true,
+      }));
+      passMelody = [...mainPart, ...endPart];
+    } else if (withEnding && chordEnding) {
+      passMelody = sliceMelodyForPass(block.melody ?? [], 0, chordsEnd).map((note) => ({ note, inEnding: false }));
+    } else {
+      passMelody = (block.melody ?? []).map((note) => ({ note, inEnding: false }));
+    }
+
+    const melEnd = melodyEndBeat(passMelody.map((m) => m.note));
+    const passEnd = isRegion ? regionEnd : Math.max(chordsEnd, melEnd);
+
+    if (!isRegion && passEnd > chordsEnd + 1e-9) {
+      pieces.push({
+        chord: { ...makeRest(passEnd - chordsEnd), id: "__pad" },
+        chordIndex: -1,
+        blockBeat: chordsEnd,
+        beats: passEnd - chordsEnd,
+        inEnding: false,
+        isPadding: true,
+      });
+    }
+
     // A rampa vai até o fim da passada: na última passada com casa 2 isso pode diferir de `total`.
     const passTotal = withEnding ? passEnd : total;
     // Segundos entre duas posições da passada (rampa linear de BPM; sem `rampTo`, andamento constante).
     const secs = (b0: number, b1: number) => (target === undefined ? (b1 - b0) * secondsPerBeat(bpm) : rampSeconds(passTotal, bpm, target, b0, b1));
     let beatsDone = 0;
     // Rampa: um ponto de tempo por tempo, com o BPM médio dele (o export MIDI reproduz a rampa por degraus).
-    if (target !== undefined && regionStart < passEnd) {
-      for (let b = regionStart; b < passEnd - 1e-9; b += 1) {
+    if (target !== undefined && baseBeat < passEnd - 1e-9) {
+      for (let b = baseBeat; b < passEnd - 1e-9; b += 1) {
         const end = Math.min(b + 1, passEnd);
-        a.tempoMap.push({ startSec: a.sec + secs(regionStart, b), bpm: (60 * (end - b)) / secs(b, end), meter, startBeat: a.beatAbs + (b - regionStart), ramp: true });
+        a.tempoMap.push({ startSec: a.sec + secs(baseBeat, b), bpm: (60 * (end - b)) / secs(b, end), meter, startBeat: a.beatAbs + (b - baseBeat), ramp: true });
       }
     }
-    for (const { chord, chordIndex, blockBeat, beats, inEnding } of pieces) {
+
+    const passStartBeat = a.beatAbs;
+    const passStartSec = a.sec;
+
+    for (const { chord, chordIndex, blockBeat, beats, inEnding, isPadding } of pieces) {
       const durationSec = secs(blockBeat, blockBeat + beats);
       a.events.push({
         chord,
@@ -210,6 +302,8 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
         pattern: block.pattern ?? song.pattern,
         instrument: block.instrument ?? song.instrument,
         ...(inEnding ? { inEnding: true } : {}),
+        ...(withEnding && hasMelodyEnding ? { melodyEndingFrom: cut } : {}),
+        ...(isPadding ? { isPadding: true } : {}),
         ...(block.bassInstrument ? { bassInstrument: block.bassInstrument } : {}),
         ...(block.drone ? { drone: true } : {}),
       });
@@ -217,6 +311,27 @@ function appendBlock(a: Acc, song: Song, itemIndex: number, repeat: number, from
       a.sec += durationSec;
       beatsDone += beats;
     }
+
+    for (const { note, inEnding } of passMelody) {
+      const nStart = passStartSec + secs(baseBeat, note.start);
+      const nDur = secs(note.start, note.start + note.duration);
+      a.melodyEvents.push({
+        note,
+        blockId: block.id,
+        itemIndex,
+        repetition: rep,
+        startBeat: passStartBeat + (note.start - baseBeat),
+        blockBeat: note.start,
+        beats: note.duration,
+        startSec: nStart,
+        durationSec: nDur,
+        bpm: target === undefined ? bpm : rampBpmAt(passTotal, bpm, target, note.start),
+        meter,
+        instrument: melodyInst,
+        ...(inEnding ? { inEnding: true } : {}),
+      });
+    }
+
     a.bars += beatsDone / meter[0];
   }
 }
@@ -239,6 +354,41 @@ export function expandRegion(song: Song, itemIndex: number, from: number, to: nu
   const hi = Math.min(n - 1, Math.max(from, to));
   if (n > 0 && lo <= hi) appendBlock(acc, song, itemIndex, 1, lo, hi);
   return finish(acc);
+}
+
+export type PlaybackBeatPosition = {
+  itemIndex: number;
+  blockId: string;
+  blockBeat: number;
+  inEnding: boolean;
+  melodyInEnding: boolean;
+};
+
+/** Mapeia um instante (em segundos, já descontado o count-in) para a posição em tempos no bloco. */
+export function playbackBeatAtSec(expanded: Expanded, elapsedSec: number): PlaybackBeatPosition | null {
+  if (!expanded.events.length || !Number.isFinite(elapsedSec) || elapsedSec < 0) return null;
+  let ev: TimedChord | undefined;
+  for (const candidate of expanded.events) {
+    if (elapsedSec >= candidate.startSec - 1e-9 && elapsedSec < candidate.startSec + candidate.durationSec) {
+      ev = candidate;
+      break;
+    }
+  }
+  if (!ev && elapsedSec <= expanded.totalSec + 1e-6 && elapsedSec >= expanded.totalSec - 1e-9) {
+    ev = expanded.events[expanded.events.length - 1];
+  }
+  if (!ev) return null;
+  const frac = ev.durationSec > 0 ? Math.max(0, Math.min(1, (elapsedSec - ev.startSec) / ev.durationSec)) : 0;
+  const blockBeat = ev.blockBeat + frac * ev.beats;
+  const inEnding = !!ev.inEnding;
+  const melodyInEnding = inEnding || (ev.melodyEndingFrom !== undefined && blockBeat >= ev.melodyEndingFrom - 1e-9);
+  return {
+    itemIndex: ev.itemIndex,
+    blockId: ev.blockId,
+    blockBeat,
+    inEnding,
+    melodyInEnding,
+  };
 }
 
 let idCounter = 0;

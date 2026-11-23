@@ -34,7 +34,14 @@ export function ExportMenu() {
     // @tonejs/midi só é baixado quando alguém exporta.
     void import("../../export/midi").then(({ downloadMidi, songToMidi }) =>
       downloadMidi(
-        songToMidi(st.song, { channel: st.midi.channel, splitBass: true, tonicFor: (id) => blockKey(st, st.song.blocks[id])?.tonic ?? null, spellFor, title: st.songName }),
+        songToMidi(st.song, {
+          channel: st.midi.channel,
+          melodyChannel: st.midi.melodyChannel,
+          splitBass: true,
+          tonicFor: (id) => blockKey(st, st.song.blocks[id])?.tonic ?? null,
+          spellFor,
+          title: st.songName,
+        }),
         st.songName,
       ),
     );
@@ -66,11 +73,11 @@ export function ExportMenu() {
           <div className="group-title">Para DAW</div>
           <button className="export-item" onClick={run(midi)}>
             <b>MIDI (.mid)</b>
-            <span className="muted small">Trilhas de acordes e baixo, tempo, compassos, marcadores e nomes dos acordes — Ableton, Logic, FL, Reaper, Cubase</span>
+            <span className="muted small">Trilhas de melodia, acordes e baixo, tempo, compassos, marcadores e cifras/N.C. — Ableton, Logic, FL, Reaper, Cubase</span>
           </button>
           <button className="export-item" onClick={run(musicXml)}>
             <b>MusicXML (.musicxml)</b>
-            <span className="muted small">Partitura com cifras, armadura e ensaios — MuseScore, Sibelius, Dorico, Finale, Logic, Cubase, Guitar Pro</span>
+            <span className="muted small">Partitura (melodia, acordes e baixo) com cifras, armadura e ensaios — MuseScore, Sibelius, Dorico, Finale, Logic</span>
           </button>
           <div className="group-title">Cifra e partitura</div>
           <button className="export-item" onClick={run(() => onText({ title: "Cifra por seção", text: songToText(useStore.getState().song, spellFor) }))}>
@@ -83,7 +90,7 @@ export function ExportMenu() {
           </button>
           <button className="export-item" onClick={run(abc)}>
             <b>ABC (.abc)</b>
-            <span className="muted small">Partitura em texto — abcjs, EasyABC, MuseScore</span>
+            <span className="muted small">Partitura em texto (melodia, acordes e baixo) — abcjs, EasyABC, MuseScore</span>
           </button>
           <div className="group-title">ChordPlanner</div>
           <button className="export-item" onClick={run(() => exportJson())}>

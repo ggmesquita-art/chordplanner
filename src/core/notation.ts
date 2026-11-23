@@ -2,11 +2,11 @@
 // compassos reais, durações notáveis, grafia de notas, armadura e "kind" MusicXML de cada acorde.
 // Puro; reaproveita a teoria existente (expansão do arranjo, voicing, símbolo canônico).
 
-import type { Chord } from "./chords";
+import { isRest, type Chord } from "./chords";
 import { chordIntervals, chordSymbol, type Modifier } from "./modifiers";
 import { makeSpeller, mod12, type PitchClass, type Speller } from "./pitch";
 import { getScale, pitchSet } from "./scales";
-import { blockBpm, expandArrangement, type Block, type Song } from "./song";
+import { blockBpm, expandArrangement, type Block, type Song, type TimedMelodyNote } from "./song";
 import type { Meter } from "./timeline";
 import { voiceChord } from "./voicing";
 
@@ -116,6 +116,19 @@ export function spellChordNotes(chord: Chord, midis: number[], spell: Speller): 
   });
 }
 
+/** Grafia técnica de uma nota MIDI da melodia seguindo o speller da tonalidade do bloco. */
+export function spellMelodyNote(midi: number, spell: Speller): SpelledNote {
+  const pc = mod12(midi);
+  let { letter, alter } = parseNoteName(spell(pc));
+  if (Math.abs(alter) > 2) {
+    const fallback = parseNoteName(["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"][pc]);
+    letter = fallback.letter;
+    alter = fallback.alter;
+  }
+  const octave = (midi - alter - LETTER_PC[letter]) / 12 - 1;
+  return { letter, step: LETTERS[letter], alter, octave, midi };
+}
+
 // ——— Armadura ———————————————————————————————————————————————————————————
 
 const SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];
@@ -217,11 +230,15 @@ export const DIV_PER_QUARTER = 16;
 export const beatDivisions = (meter: Meter) => DIV_PER_WHOLE / meter[1];
 export const barCapacity = (meter: Meter) => meter[0] * beatDivisions(meter);
 
-export type ChordRef = { chord: Chord; voiced: number[] };
+export type ChordRef = { chord: Chord; voiced: number[]; isPadding?: boolean };
 
 /** Trecho de acorde dentro de um compasso (em tempos). */
 export type Piece = { ref: ChordRef; start: number; beats: number; first: boolean; continues: boolean };
 export type Bar = { pieces: Piece[] };
+
+export type MelodyPiece = { pitch: number; start: number; beats: number; first: boolean; continues: boolean };
+export type MelodyBar = { pieces: MelodyPiece[] };
+export type MelodyCell = { pitch?: number; startDiv: number; durDiv: number; tieIn: boolean; tieOut: boolean; first: boolean };
 
 const EPS = 1e-9;
 
@@ -313,6 +330,73 @@ export function barCells(bar: Bar | undefined, meter: Meter): Cell[] {
   return cells;
 }
 
+/** Divide notas melódicas (`start` e `beats` em tempos do bloco) em compassos de `perBar`, com ligaduras nas barras. */
+export function splitMelodyBars(
+  notes: { pitch: number; start: number; beats: number }[],
+  perBar: number,
+  totalBars: number,
+): MelodyBar[] {
+  const bars: MelodyBar[] = Array.from({ length: totalBars }, () => ({ pieces: [] }));
+  const sorted = [...notes].sort((a, b) => a.start - b.start);
+  for (const it of sorted) {
+    let pos = Math.max(0, it.start);
+    let remaining = it.beats;
+    let first = true;
+    while (remaining > EPS) {
+      const bi = Math.floor(pos / perBar + EPS);
+      const take = Math.min(perBar * (bi + 1) - pos, remaining);
+      remaining -= take;
+      (bars[bi] ??= { pieces: [] }).pieces.push({
+        pitch: it.pitch,
+        start: pos - bi * perBar,
+        beats: take,
+        first,
+        continues: remaining > EPS,
+      });
+      pos += take;
+      first = false;
+    }
+  }
+  return bars;
+}
+
+/** Células notáveis da voz melódica de um compasso (notas + pausas preenchidas até fechar o compasso). */
+export function melodyBarCells(bar: MelodyBar | undefined, meter: Meter): MelodyCell[] {
+  const bd = beatDivisions(meter);
+  const cap = barCapacity(meter);
+  const cells: MelodyCell[] = [];
+  let cursor = 0;
+  const rest = (from: number, to: number) => {
+    for (const d of notatable(to - from)) {
+      cells.push({ startDiv: from, durDiv: d, tieIn: false, tieOut: false, first: false });
+      from += d;
+    }
+  };
+  for (const p of bar?.pieces ?? []) {
+    const s = Math.round(p.start * bd);
+    const e = Math.min(cap, Math.round((p.start + p.beats) * bd));
+    if (s > cursor) rest(cursor, s);
+    const actualStart = Math.max(s, cursor);
+    if (e <= actualStart) continue;
+    const parts = notatable(e - actualStart);
+    let at = actualStart;
+    parts.forEach((d, i) => {
+      cells.push({
+        pitch: p.pitch,
+        startDiv: at,
+        durDiv: d,
+        tieIn: i > 0 || !p.first,
+        tieOut: i < parts.length - 1 || p.continues,
+        first: p.first && i === 0,
+      });
+      at += d;
+    });
+    cursor = e;
+  }
+  if (cursor < cap) rest(cursor, cap);
+  return cells;
+}
+
 // ——— Segmentos (arranjo expandido) ————————————————————————————————————————
 
 export type Segment = {
@@ -328,6 +412,8 @@ export type Segment = {
   sig: KeySignature;
   spell: Speller;
   bars: Bar[];
+  melodyBars: MelodyBar[];
+  hasMelody: boolean;
 };
 
 /**
@@ -337,6 +423,14 @@ export type Segment = {
 export function buildSegments(song: Song, opts: NotationOptions = {}): Segment[] {
   const nz = resolveNotation(opts);
   const expanded = expandArrangement(song);
+  const melByPass = new Map<string, TimedMelodyNote[]>();
+  for (const m of expanded.melodyEvents) {
+    const k = `${m.itemIndex}:${m.repetition}`;
+    const list = melByPass.get(k);
+    if (list) list.push(m);
+    else melByPass.set(k, [m]);
+  }
+
   const segments: Segment[] = [];
   let prevNotes: number[] | null = null;
   let current: { key: string; items: { ref: ChordRef; beats: number }[]; first: (typeof expanded.events)[number] } | null = null;
@@ -346,6 +440,14 @@ export function buildSegments(song: Song, opts: NotationOptions = {}): Segment[]
     const block = song.blocks[first.blockId];
     const spell = nz.spellFor(block);
     const key = nz.keyFor(block);
+    const bars = splitBars(current.items, first.meter[0]);
+    const passMelody = melByPass.get(current.key) ?? [];
+    const melodyBars = splitMelodyBars(
+      passMelody.map((m) => ({ pitch: m.note.pitch, start: m.blockBeat, beats: m.beats })),
+      first.meter[0],
+      bars.length,
+    );
+    while (bars.length < melodyBars.length) bars.push({ pieces: [] });
     segments.push({
       itemIndex: first.itemIndex,
       repetition: first.repetition,
@@ -357,7 +459,9 @@ export function buildSegments(song: Song, opts: NotationOptions = {}): Segment[]
       key,
       sig: keySignature(key, spell),
       spell,
-      bars: splitBars(current.items, first.meter[0]),
+      bars,
+      melodyBars,
+      hasMelody: passMelody.length > 0,
     });
     current = null;
   };
@@ -367,6 +471,10 @@ export function buildSegments(song: Song, opts: NotationOptions = {}): Segment[]
       flush();
       prevNotes = null;
       current = { key: pass, items: [], first: ev };
+    }
+    if (isRest(ev.chord)) {
+      current.items.push({ ref: { chord: ev.chord, voiced: [], ...(ev.isPadding ? { isPadding: true } : {}) }, beats: ev.beats });
+      continue;
     }
     const voiced = voiceChord(ev.chord, song.voiceLeading ? prevNotes : null);
     if (song.voiceLeading) prevNotes = voiced;
@@ -380,6 +488,7 @@ export function buildSegments(song: Song, opts: NotationOptions = {}): Segment[]
 
 /** Partes do símbolo do app: fundamental, sufixo (qualidade/extensões) e baixo (slash), com a grafia dada. */
 export function chordParts(chord: Chord, spell: Speller): { root: string; suffix: string; bass: string | null } {
+  if (isRest(chord)) return { root: "", suffix: "N.C.", bass: null };
   const root = spell(chord.root);
   const bass = chord.bass !== undefined && mod12(chord.bass) !== mod12(chord.root) ? spell(chord.bass) : null;
   let suffix = chordSymbol(chord, spell).slice(root.length);
@@ -396,6 +505,7 @@ const vals = <K extends Modifier["kind"]>(mods: Modifier[], kind: K) =>
 
 /** `kind` MusicXML do acorde e os `<degree>` para o que o kind não cobre. */
 export function chordKind(chord: Chord): KindInfo {
+  if (isRest(chord)) return { kind: "none", degrees: [] };
   const mods = chord.modifiers;
   const ext = vals(mods, "ext");
   const adds = vals(mods, "add");

@@ -5,6 +5,7 @@
 
 import type { Expanded } from "../core/song";
 import { primeAudioContext } from "./context";
+import { setMixState, type MixerState, type TrackBus } from "./status";
 
 export { instrumentProgress, instrumentStatus, pickEviction, subscribeStatus, type LoadStatus } from "./status";
 
@@ -16,6 +17,10 @@ export type PlayOptions = {
   swing: number;
   /** Canal MIDI de cada bloco (override do bloco ou global). */
   channelFor: (blockId: string) => number;
+  /** Canal MIDI da pista de melodia em cada bloco. */
+  melodyChannelFor?: (blockId: string) => number;
+  /** Estado inicial de volume/mute/solo das pistas. */
+  mixer?: MixerState;
   onEvent: (index: number) => void;
   onEnd: () => void;
   /** Tônica (pitch class) de cada bloco, para o bordão. */
@@ -65,13 +70,21 @@ export async function unlock() {
   await (await loadPlayer()).unlock();
 }
 
-export async function previewNotes(midi: number[], instrumentId: string, opts: { arpeggio?: boolean; seconds?: number } = {}) {
+export async function previewNotes(midi: number[], instrumentId: string, opts: { arpeggio?: boolean; seconds?: number; track?: TrackBus } = {}) {
   primeAudioContext();
   const gen = generation;
   const m = await loadPlayer();
   await m.unlock();
   if (gen !== generation) return;
   await m.previewNotes(midi, instrumentId, opts);
+}
+
+export function setTrackMix(mix: MixerState) {
+  setMixState(mix);
+}
+
+export function getPlaybackTime(): { running: boolean; seconds: number; offset: number; totalSec: number } | null {
+  return player?.getPlaybackTime?.() ?? null;
 }
 
 export async function play(expanded: Expanded, opts: PlayOptions) {
@@ -86,22 +99,24 @@ export async function play(expanded: Expanded, opts: PlayOptions) {
 // ——— Teclado MIDI ao vivo: síncrono quando o player já carregou (latência mínima) ———
 
 /** Teclas apertadas antes de o motor carregar: só atacam se ainda estiverem apertadas quando ele chegar. */
-const pendingLive = new Map<number, { velocity: number; instrumentId: string }>();
+const pendingLive = new Map<number, { velocity: number; instrumentId: string; opts?: { track?: TrackBus; channel?: number } }>();
 
-export function liveNoteOn(note: number, velocity: number, instrumentId: string) {
+export function liveNoteOn(note: number, velocity: number, instrumentId: string, opts?: { track?: TrackBus; channel?: number }) {
   if (player) {
-    player.liveNoteOn(note, velocity, instrumentId);
+    if (opts) player.liveNoteOn(note, velocity, instrumentId, opts);
+    else player.liveNoteOn(note, velocity, instrumentId);
     return;
   }
   primeAudioContext();
-  pendingLive.set(note, { velocity, instrumentId });
+  pendingLive.set(note, { velocity, instrumentId, opts });
   void loadPlayer().then(
     async (m) => {
       await m.unlock().catch(() => {});
       const p = pendingLive.get(note);
       if (!p) return;
       pendingLive.delete(note);
-      m.liveNoteOn(note, p.velocity, p.instrumentId);
+      if (p.opts) m.liveNoteOn(note, p.velocity, p.instrumentId, p.opts);
+      else m.liveNoteOn(note, p.velocity, p.instrumentId);
     },
     () => pendingLive.delete(note),
   );

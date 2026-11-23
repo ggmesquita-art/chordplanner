@@ -9,10 +9,14 @@ import { useLiveChord } from "./useMidiInput";
 export function LiveChordBadge() {
   const enabled = useStore((s) => s.midi.inputEnabled);
   const record = useStore((s) => s.midi.inputRecord);
+  const recordTarget = useStore((s) => s.midi.inputRecordTarget);
   const { notes, chord } = useLiveChord();
   const ctx = useCtx();
   const spell = useSpeller();
   if (!enabled) return null;
+
+  const recLabel =
+    recordTarget === "melody-step" ? "● melodia (passo)" : recordTarget === "melody-live" ? "● melodia (ao vivo)" : "● grava";
 
   let body: React.ReactNode = <span className="muted">toque no teclado</span>;
   let tone = "";
@@ -36,8 +40,8 @@ export function LiveChordBadge() {
       <span aria-hidden="true">🎹</span>
       {body}
       {record && (
-        <span className="live-rec" title="Ao soltar as teclas, o acorde entra na progressão">
-          ● grava
+        <span className="live-rec" title="Gravação MIDI ativa">
+          {recLabel}
         </span>
       )}
     </div>

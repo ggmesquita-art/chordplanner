@@ -25,6 +25,15 @@ function useShortcuts() {
       } else if (e.code === "Space" && !(t.getAttribute("role") === "button" || t.tagName === "BUTTON")) {
         e.preventDefault();
         void togglePlay();
+      } else if (
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "r" &&
+        !document.querySelector('[role="dialog"], [role="alertdialog"]')
+      ) {
+        e.preventDefault();
+        s.addRest();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -83,7 +92,7 @@ export default function App() {
           )}
           <ModifierPanel />
           <footer className="footer muted small">
-            Espaço: tocar/parar · Ctrl+Z / Ctrl+Shift+Z: desfazer/refazer · Setas + Enter navegam na roda · Samples: SplendidGrandPiano, Greg Sullivan E-Pianos, VCSL, Smolken e MusyngKite (via smplr)
+            Espaço: tocar/parar · R: respiro (N.C.) · Ctrl+Z / Ctrl+Shift+Z: desfazer/refazer · Setas + Enter navegam na roda · Samples: SplendidGrandPiano, Greg Sullivan E-Pianos, VCSL, Smolken e MusyngKite (via smplr)
           </footer>
         </aside>
         {dock === "compact" && <MiniDock />}

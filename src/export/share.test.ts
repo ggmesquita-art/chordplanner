@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { makeChord } from "../core/chords";
+import { makeChord, makeRest } from "../core/chords";
+import { makeMelodyNote } from "../core/melody";
 import { makeSong } from "../core/song";
 import { parseSongFile, sanitizeContent, serializeSongFile, SongFileError, toSongFile } from "./json";
+import { CURRENT_VERSION } from "./migrate";
 import { decodeShare, encodeShare } from "./url";
 
 function sample(name = "Minha música") {
@@ -32,7 +34,7 @@ describe("arquivo de música", () => {
     const file = sample();
     expect(errorOf("{nao json")).toBe("O arquivo não é um JSON válido.");
     expect(errorOf(JSON.stringify({ ...file, format: "outro" }))).toBe("Este arquivo não é uma música do ChordPlanner.");
-    expect(errorOf(JSON.stringify({ ...file, version: 2 }))).toBe("Arquivo criado por uma versão mais nova do ChordPlanner.");
+    expect(errorOf(JSON.stringify({ ...file, version: CURRENT_VERSION + 1 }))).toBe("Arquivo criado por uma versão mais nova do ChordPlanner.");
     expect(errorOf(JSON.stringify({ ...file, scaleId: "nao-existe" }))).toBe("O arquivo está danificado ou incompleto.");
   });
 
@@ -159,11 +161,54 @@ describe("conteúdo hostil (arquivo ou link de terceiros)", () => {
 });
 
 describe("versão do arquivo", () => {
-  it("versão futura mantém a mensagem; versão inválida é arquivo danificado", () => {
+  it("versão futura mantém a mensagem; versão inválida é arquivo danificado; v1 migra para atual", () => {
     const base = JSON.parse(serializeSongFile(sample()));
-    expect(errorOf(JSON.stringify({ ...base, version: 2 }))).toContain("versão mais nova");
+    expect(errorOf(JSON.stringify({ ...base, version: CURRENT_VERSION + 1 }))).toContain("versão mais nova");
     expect(errorOf(JSON.stringify({ ...base, version: 0 }))).toContain("danificado");
     expect(errorOf(JSON.stringify({ ...base, version: 1 }))).toBeNull();
+    const migrated = parseSongFile(JSON.stringify({ ...base, version: 1 }));
+    expect(migrated.version).toBe(CURRENT_VERSION);
+  });
+});
+
+describe("campos v4 (melodia, pausas N.C. e durações curtas)", () => {
+  it("ida e volta em JSON e link #s= preservando melodia, melodyEnding, melodyInstrument e N.C.", async () => {
+    const song = makeSong();
+    song.melodyInstrument = "flute";
+    const block = Object.values(song.blocks)[0];
+    block.chords = [makeChord(0, "maj", 0.25), makeRest(1.75), makeChord(7, "maj", 2)];
+    block.melodyInstrument = "violin";
+    block.melodyMidiChannel = 4;
+    block.melody = [makeMelodyNote(64, 0, 1, 0.9), makeMelodyNote(67, 1, 0.25)];
+    block.melodyEnding = [makeMelodyNote(72, 0, 2)];
+
+    const file = toSongFile({ name: "Melodia v2", scaleId: "major", tonic: 0, song });
+    expect(parseSongFile(serializeSongFile(file))).toEqual(file);
+    const hash = await encodeShare(file);
+    expect(await decodeShare(hash)).toEqual(file);
+  });
+
+  it("saneamento normaliza sobreposição de melodia e descarta notas inválidas", () => {
+    const song = makeSong();
+    const id = Object.keys(song.blocks)[0];
+    const raw = structuredClone(song) as unknown as { blocks: Record<string, Record<string, unknown>> };
+    raw.blocks[id].chords = [{ rest: true, duration: 0.25 }, { rest: "nao", duration: 2 }];
+    raw.blocks[id].melody = [
+      { id: "m1", pitch: 60, start: 0, duration: 2 },
+      { id: "m2", pitch: 64, start: 1, duration: 1 },
+      { id: "bad", pitch: 120, start: 2, duration: 1 },
+    ];
+    raw.blocks[id].melodyInstrument = "nao-existe";
+    const out = sanitizeContent({ scaleId: "major", tonic: 0, song: raw })!;
+    const b = out.song.blocks[id];
+    expect(b.chords).toHaveLength(1);
+    expect(b.chords[0].rest).toBe(true);
+    expect(b.chords[0].duration).toBe(0.25);
+    expect(b.melody?.map((n) => [n.id, n.start, n.duration])).toEqual([
+      ["m1", 0, 1],
+      ["m2", 1, 1],
+    ]);
+    expect(b.melodyInstrument).toBeUndefined();
   });
 });
 

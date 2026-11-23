@@ -3,6 +3,50 @@
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
+export type TrackBus = "chords" | "melody";
+export type TrackMix = { volume: number; muted: boolean; solo: boolean };
+export type MixerState = { chords: TrackMix; melody: TrackMix };
+
+export const DEFAULT_MIXER: MixerState = {
+  chords: { volume: 1, muted: false, solo: false },
+  melody: { volume: 1, muted: false, solo: false },
+};
+
+/** Ganho efetivo (0..1.5) de uma pista considerando mute e solo. */
+export function computeTrackGain(mix: MixerState, track: TrackBus): number {
+  const anySolo = mix.chords.solo || mix.melody.solo;
+  const t = mix[track];
+  if (anySolo && !t.solo) return 0;
+  if (t.muted) return 0;
+  return Math.max(0, Math.min(1.5, Number.isFinite(t.volume) ? t.volume : 1));
+}
+
+let currentMix: MixerState = structuredClone(DEFAULT_MIXER);
+const mixListeners = new Set<(mix: MixerState) => void>();
+
+export const getMixState = (): MixerState => currentMix;
+
+export function setMixState(mix: MixerState) {
+  currentMix = structuredClone(mix);
+  mixListeners.forEach((cb) => cb(currentMix));
+}
+
+export function subscribeMix(cb: (mix: MixerState) => void): () => void {
+  mixListeners.add(cb);
+  return () => mixListeners.delete(cb);
+}
+
+export type PlaybackClockSnapshot = { running: boolean; seconds: number; offset: number; totalSec: number };
+let playbackClock: (() => PlaybackClockSnapshot | null) | null = null;
+
+export function registerPlaybackClock(fn: () => PlaybackClockSnapshot | null) {
+  playbackClock = fn;
+}
+
+export function getPlaybackTime(): PlaybackClockSnapshot | null {
+  return playbackClock ? playbackClock() : null;
+}
+
 const statuses = new Map<string, LoadStatus>();
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((l) => l());

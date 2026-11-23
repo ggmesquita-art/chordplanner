@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { makeChord } from "../core/chords";
+import { makeChord, makeRest } from "../core/chords";
+import { makeMelodyNote } from "../core/melody";
 import { makeSpeller, pcName } from "../core/pitch";
 import { getScale, pitchSet } from "../core/scales";
 import { makeSong } from "../core/song";
@@ -41,5 +42,26 @@ describe("songToText", () => {
     const spellFor = (b: typeof block) => (b.key ? makeSpeller(b.key.tonic, pitchSet(b.key.tonic, getScale(b.key.scaleId)), "auto") : sharp);
     expect(songToText(song, spellFor)).toContain("| B♭ |");
     expect(songToText(song, () => sharp)).toContain("| A♯ |");
+  });
+
+  it("emite N.C. explícito (inclusive multi-compasso), acordes de 0.25 e bloco só de melodia", () => {
+    const { song, block } = setup();
+    block.chords = [makeChord(0, "maj", 2), makeRest(2), makeRest(8)];
+    expect(songToText(song, () => sharp)).toContain("| C N.C. | N.C. | N.C. |");
+
+    block.chords = [makeChord(0, "maj", 0.25), makeChord(7, "maj", 3.75)];
+    expect(songToText(song, () => sharp)).toContain("| C G |");
+
+    block.chords = [];
+    block.melody = [makeMelodyNote(60, 0, 6)];
+    expect(songToText(song, () => sharp)).toContain("| N.C. | N.C. |");
+
+    // Melodia ultrapassa acordes (com e sem Casa 2)
+    block.chords = [makeChord(0, "maj", 4)];
+    block.melody = [makeMelodyNote(64, 0, 8)];
+    expect(songToText(song, () => sharp)).toContain("| C | N.C. |");
+    song.arrangement[0].repeat = 2;
+    block.ending = [makeChord(7, "maj", 4)];
+    expect(songToText(song, () => sharp)).toContain("|: C | 1. N.C. :| 2. G |");
   });
 });

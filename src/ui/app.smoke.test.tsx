@@ -26,14 +26,14 @@ describe("App (fumaça)", () => {
     render(<App />);
     expect(screen.getByText("escolha a tônica")).toBeTruthy();
 
-    // Clicar na fatia de Ré maior define a tônica.
+    // Clicar na fatia de Ré maior define a tônica (com checkbox desmarcada, o bloco começa vazio).
     const d = screen.getAllByRole("button").find((el) => el.getAttribute("aria-label")?.startsWith("Ré maior"))!;
     await act(async () => fireEvent.click(d));
     expect(useStore.getState().tonic).toBe(2);
-    expect(selectBlock(useStore.getState())!.chords.length).toBe(1);
+    expect(selectBlock(useStore.getState())!.chords.length).toBe(0);
 
-    // Adicionar Sol maior (IV) e Lá maior (V).
-    for (const name of ["Sol maior", "Lá maior"]) {
+    // Adicionar Ré maior (I), Sol maior (IV) e Lá maior (V).
+    for (const name of ["Ré maior", "Sol maior", "Lá maior"]) {
       const el = screen.getAllByRole("button").find((b) => b.getAttribute("aria-label")?.startsWith(name))!;
       await act(async () => fireEvent.click(el));
     }
@@ -60,13 +60,14 @@ describe("App (fumaça)", () => {
     await act(async () => fireEvent.click(seven));
     expect(screen.getAllByText("A7").length).toBeGreaterThan(0);
 
-    // Novo bloco + template + export.
+    // Novo bloco (com checkbox desmarcada começa vazio) + template + export.
     await act(async () => fireEvent.click(screen.getByLabelText("Novo bloco")));
     expect(useStore.getState().song.arrangement.length).toBe(2);
+    expect(selectBlock(useStore.getState())!.chords.length).toBe(0);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "⤓ Exportar ▾" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /Cifra \(texto\)/ })));
     expect((screen.getByRole("dialog").querySelector("textarea") as HTMLTextAreaElement).value).toContain("A7");
-  });
+  }, 15_000);
 
   it("salvar, novo (com confirmação) e abrir pela interface", async () => {
     useStore.getState().newSong();

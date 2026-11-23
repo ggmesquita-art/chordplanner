@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { keyLabel } from "../../core/view";
 import { useStore } from "../../state/store";
+import { AIPanel } from "../AIPanel/AIPanel";
 import { Header } from "../Header";
 import { togglePlay, usePositionLabel } from "../hooks";
 import { Transport } from "../Transport/Transport";
@@ -23,6 +24,7 @@ export function TopBar() {
   const position = usePositionLabel();
   const [peek, setPeek] = useState(false);
   const [held, setHeld] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const showBtn = useRef<HTMLButtonElement>(null);
@@ -50,6 +52,8 @@ export function TopBar() {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
+      const el = e.target as Element | null;
+      if (el?.closest?.('[data-popover-owner="topbar"]')) return;
       if (ref.current && !ref.current.contains(e.target as Node)) close();
     };
     // Na janela (depois do documento): o Esc de um popover interno é tratado primeiro e marcado.
@@ -96,6 +100,15 @@ export function TopBar() {
           <span className="strip-key">{tonic === null ? "sem tônica" : keyLabel(tonic, scaleId, accidentals)}</span>
           <span className="mono muted strip-pos">⏱ {position}</span>
           <div className="spacer" />
+          <button
+            type="button"
+            className="btn small ai-btn"
+            aria-haspopup="dialog"
+            onClick={() => setAiOpen(true)}
+            title="IA Musical (MIDI-GPT)"
+          >
+            ✨ IA
+          </button>
           <button ref={showBtn} className="btn small" aria-expanded={open} onClick={() => (held ? close() : setHeld(true))} title="Mostrar e manter os controles do topo">
             {held ? "▴ Ocultar controles" : "▾ Mostrar controles"}
           </button>
@@ -113,7 +126,7 @@ export function TopBar() {
         </div>
       )}
       <div ref={panel} className="top-panel" inert={auto && !open} onPointerDown={auto ? () => setHeld(true) : undefined}>
-        <Header />
+        <Header onOpenAI={() => setAiOpen(true)} />
         <Transport />
         {!auto && (
           <button
@@ -130,6 +143,7 @@ export function TopBar() {
           </button>
         )}
       </div>
+      {aiOpen && <AIPanel onClose={() => setAiOpen(false)} />}
     </div>
   );
 }

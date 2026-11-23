@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getInstrumentDef } from "../../audio/instruments";
-import type { VoicingId } from "../../core/chords";
+import { isRest, type VoicingId } from "../../core/chords";
 import {
   conflictingModifier,
   hasModifier,
@@ -78,6 +78,7 @@ const ORDINAL = ["Fund.", "1ª", "2ª", "3ª", "4ª", "5ª", "6ª"];
 export function ModifierPanel() {
   const chord = useStore((s) => selectChord(s));
   const block = useBlock();
+  const editEnding = useStore((s) => s.editEnding);
   const mode = useStore((s) => s.mode);
   const view = useStore((s) => s.instrumentView);
   const ctx = useCtx();
@@ -126,7 +127,31 @@ export function ModifierPanel() {
     );
   }
 
-  const index = block.chords.findIndex((c) => c.id === chord.id);
+  if (isRest(chord)) {
+    return (
+      <section ref={panel} className={`modifiers empty rest-selected ${open ? "open" : ""}`} aria-label="Modificadores">
+        <div className="mod-bar">
+          <h2>
+            Modificadores <span className="muted">— respiro:</span> <span className="accent">N.C.</span>
+          </h2>
+          {drawerToggle}
+        </div>
+        <p className="muted">Respiro harmônico (N.C.): os acordes e o baixo silenciam neste trecho enquanto a melodia e o bordão seguem normalmente.</p>
+        <div className="mod-buttons">
+          <button type="button" className="btn" onClick={() => actions.toggleRest(chord.id)}>
+            Converter em acorde
+          </button>
+          <button type="button" className="btn danger" onClick={() => actions.removeChord(chord.id)}>
+            Remover respiro
+          </button>
+        </div>
+        <Presets />
+      </section>
+    );
+  }
+
+  const activeList = editEnding ? (block.ending ?? []) : block.chords;
+  const index = activeList.findIndex((c) => c.id === chord.id);
   const resolved = resolveChord(chord, ctx, spell);
   const allowed = (st: NoteStatus) => mode === "free" || st === "diatonic" || (mode === "colorful" && st === "tension");
 

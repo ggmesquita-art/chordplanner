@@ -87,4 +87,20 @@ describe("teclado", () => {
     expect(useStore.getState().song.arrangement.map((a) => a.id)).toEqual([ids[1], ids[0]]);
     expect((document.activeElement as HTMLElement).dataset.itemId).toBe(ids[1]);
   });
+
+  it("novos blocos ajustam-se horizontalmente sem minWidth fixo e ações ficam em barra única fora dos cards", () => {
+    const s = useStore.getState();
+    for (let i = 0; i < 6; i++) s.addBlock();
+    const { container } = render(<Arrangement />);
+    const cards = Array.from(container.querySelectorAll<HTMLElement>(".block-card"));
+    expect(cards.length).toBe(8);
+    for (const card of cards) {
+      expect(card.style.minWidth).toBe("0px");
+      expect(card.style.flexShrink).toBe("1");
+      expect(card.querySelector(".block-actions")).toBeNull();
+    }
+    const bar = container.querySelector(".block-actions-bar");
+    expect(bar).toBeTruthy();
+    expect(bar?.textContent).toContain("Bloco 8");
+  });
 });

@@ -3,9 +3,11 @@
 // `[C]` = acorde que começa ali, `.` = acorde continua (inclusive através da barra), `.~[G]` = acorde no meio do tempo.
 // Repetições NÃO são expandidas: `×N` no nome da seção e `|: … :|`; a casa 2 sai como `1. … :| 2. …` (como o export de texto).
 
+import { isRest, makeRest } from "../core/chords";
+import { melodyEndBeat } from "../core/melody";
 import { chordParts, keySignature, resolveNotation, splitBars, toAscii, type Bar, type KeyInfo } from "../core/notation";
 import type { Speller } from "../core/pitch";
-import { blockBpm, blockMeter, endingCut, type Block, type Song } from "../core/song";
+import { blockBpm, blockChordBeats, blockMeter, endingCut, type Block, type Song } from "../core/song";
 import { meterLabel } from "../core/timeline";
 
 export type ChordProOptions = {
@@ -29,10 +31,15 @@ function barText(bar: Bar, perBar: number, spell: Speller): string {
   for (let k = 0; k < perBar; k++) {
     const starts = bar.pieces.filter((p) => p.first && p.start >= k - EPS && p.start < k + 1 - EPS);
     if (!starts.length) {
-      cells.push(".");
+      if (k === 0 && bar.pieces.some((p) => !p.first && p.start < EPS && isRest(p.ref.chord))) {
+        cells.push("[N.C.]");
+      } else {
+        cells.push(".");
+      }
       continue;
     }
     const tokens = starts.map((p) => {
+      if (isRest(p.ref.chord)) return "[N.C.]";
       const { root, suffix, bass } = chordParts(p.ref.chord, spell);
       return `[${toAscii(root + suffix + (bass ? `/${bass}` : ""))}]`;
     });
@@ -70,7 +77,14 @@ export function songToChordPro(song: Song, spellFor?: (block: Block) => Speller,
     const perBar = meter[0];
     const asBars = (chords: Block["chords"]) =>
       splitBars(chords.map((chord) => ({ ref: { chord, voiced: [] }, beats: chord.duration })), perBar).map((b) => barText(b, perBar, spell));
-    const bars = asBars(block.chords);
+    const chordsEnd = blockChordBeats(block);
+    const melEnd = melodyEndBeat(block.melody);
+    let chordsForBars = block.chords;
+    if (melEnd > chordsEnd + EPS) {
+      const targetBeats = Math.ceil((melEnd - EPS) / perBar) * perBar;
+      if (targetBeats > chordsEnd + EPS) chordsForBars = [...block.chords, makeRest(targetBeats - chordsEnd)];
+    }
+    const bars = asBars(chordsForBars);
     if (!bars.length) {
       out.push("| (vazio) |", "{end_of_verse}");
       return;

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "app": "vite build && electron .",
     "app:samples": "vite build && electron . --mirror-samples",
-    "app:dist": "vite build && electron-builder --mac --publish never"
+    "app:dist": "vite build && electron-builder --mac --publish never",
+    "app:dist:win": "vite build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@tonejs/midi": "^2.0.28",
@@ -71,6 +72,22 @@
       "category": "public.app-category.music",
       "icon": "electron/resources/icon.png",
       "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/resources/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     }
   },
   "description": "Planejador de progressões de acordes com roda harmônica, arranjo e exportação para DAW e partitura."

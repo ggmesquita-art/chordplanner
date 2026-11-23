@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { makeChord } from "./chords";
-import { expandArrangement, expandRegion, makeBlock, makeSong } from "./song";
+import { isRest, makeChord, makeRest } from "./chords";
+import { DEFAULT_MELODY_INSTRUMENT, makeMelodyNote } from "./melody";
+import { blockBeats, expandArrangement, expandRegion, makeBlock, makeSong, playbackBeatAtSec } from "./song";
 import { rampSeconds } from "./timeline";
 
 function build() {
@@ -175,5 +176,117 @@ describe("casa 1 / casa 2", () => {
     const last = ex.events[ex.events.length - 1];
     expect(last.endBpm).toBeCloseTo(60);
     expect(last.startSec + last.durationSec).toBeCloseTo(ex.totalSec);
+  });
+});
+
+describe("melodia, bloco sem acordes, N.C. e melodyEnding", () => {
+  it("bloco só com melodia (sem acordes) gera padding silencioso, totalBars e melodyEvents", () => {
+    const song = makeSong();
+    song.bpm = 120;
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.melody = [makeMelodyNote(64, 0, 1), makeMelodyNote(67, 2, 2)];
+    expect(blockBeats(block)).toBe(4);
+    const ex = expandArrangement(song);
+    expect(ex.totalBars).toBe(1);
+    expect(ex.totalSec).toBeCloseTo(2);
+    expect(ex.events).toHaveLength(1);
+    expect(ex.events[0].isPadding).toBe(true);
+    expect(isRest(ex.events[0].chord)).toBe(true);
+    expect(ex.melodyEvents).toHaveLength(2);
+    expect(ex.melodyEvents[0].instrument).toBe(DEFAULT_MELODY_INSTRUMENT);
+    expect(ex.melodyEvents[1].startSec).toBeCloseTo(1);
+  });
+
+  it("melodia mais longa que os acordes estende a passada até o fim da melodia", () => {
+    const song = makeSong();
+    song.bpm = 60;
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.chords = [makeChord(0, "maj", 2), makeRest(2)];
+    block.melody = [makeMelodyNote(69, 4, 4)];
+    const ex = expandArrangement(song);
+    expect(ex.totalBars).toBe(2);
+    expect(ex.totalSec).toBeCloseTo(8);
+    expect(ex.events.map((e) => [e.blockBeat, e.beats, !!e.isPadding])).toEqual([
+      [0, 2, false],
+      [2, 2, false],
+      [4, 4, true],
+    ]);
+  });
+
+  it("Casa 2 com melodyEnding substitui o último compasso da melodia na última repetição", () => {
+    const song = makeSong();
+    song.bpm = 120;
+    song.melodyInstrument = "flute";
+    song.arrangement[0].repeat = 2;
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.chords = [makeChord(0, "maj", 4), makeChord(7, "maj", 4)];
+    block.melody = [makeMelodyNote(60, 0, 2), makeMelodyNote(64, 4, 2)];
+    block.melodyEnding = [makeMelodyNote(72, 0, 4)];
+    const ex = expandArrangement(song);
+    const rep0 = ex.melodyEvents.filter((m) => m.repetition === 0);
+    const rep1 = ex.melodyEvents.filter((m) => m.repetition === 1);
+    expect(rep0.map((m) => m.note.pitch)).toEqual([60, 64]);
+    expect(rep1.map((m) => [m.note.pitch, m.blockBeat, !!m.inEnding])).toEqual([
+      [60, 0, false],
+      [72, 4, true],
+    ]);
+    expect(rep1[1].instrument).toBe("flute");
+  });
+
+  it("expandRegion inclui apenas notas dentro do trecho dos acordes", () => {
+    const song = makeSong();
+    song.bpm = 120;
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.chords = [makeChord(0, "maj", 2), makeChord(5, "maj", 4), makeChord(7, "maj", 2)];
+    block.melody = [makeMelodyNote(60, 1, 2), makeMelodyNote(64, 4, 2), makeMelodyNote(67, 6, 2)];
+    const r = expandRegion(song, 0, 1, 1);
+    expect(r.melodyEvents.map((m) => [m.note.pitch, m.startBeat, m.beats])).toEqual([
+      [60, 0, 1],
+      [64, 2, 2],
+    ]);
+  });
+
+  it("playbackBeatAtSec mapeia progresso normal, bloco só melodia e casa 2", () => {
+    const song = makeSong();
+    song.bpm = 120; // 0.5s por tempo
+    const block = song.blocks[song.arrangement[0].blockId];
+    block.chords = [makeChord(0, "maj", 2), makeChord(7, "maj", 2)];
+    const ex = expandArrangement(song);
+    expect(playbackBeatAtSec(ex, -0.1)).toBeNull();
+    expect(playbackBeatAtSec(ex, 0.5)).toMatchObject({ itemIndex: 0, blockId: block.id, blockBeat: 1, inEnding: false });
+    expect(playbackBeatAtSec(ex, 1.5)).toMatchObject({ itemIndex: 0, blockId: block.id, blockBeat: 3, inEnding: false });
+    expect(playbackBeatAtSec(ex, 2.0)).toMatchObject({ itemIndex: 0, blockId: block.id, blockBeat: 4, inEnding: false });
+    expect(playbackBeatAtSec(ex, 2.5)).toBeNull();
+
+    // Bloco só de melodia (usa evento de padding)
+    const soloMel = makeSong();
+    soloMel.bpm = 60; // 1s por tempo
+    const b2 = soloMel.blocks[soloMel.arrangement[0].blockId];
+    b2.melody = [makeMelodyNote(64, 0, 4)];
+    const exMel = expandArrangement(soloMel);
+    expect(playbackBeatAtSec(exMel, 2.5)).toMatchObject({ itemIndex: 0, blockId: b2.id, blockBeat: 2.5, inEnding: false });
+
+    // Casa 2 na última repetição
+    const repSong = makeSong();
+    repSong.bpm = 120;
+    repSong.arrangement[0].repeat = 2;
+    const b3 = repSong.blocks[repSong.arrangement[0].blockId];
+    b3.chords = [makeChord(0, "maj", 4), makeChord(5, "maj", 4)];
+    b3.ending = [makeChord(7, "maj", 4)];
+    const exRep = expandArrangement(repSong);
+    // 1ª repetição = 0..4s (8 tempos); 2ª repetição = 4..8s (acorde em 4..6s, casa 2 em 6..8s)
+    expect(playbackBeatAtSec(exRep, 7)).toMatchObject({ itemIndex: 0, blockId: b3.id, blockBeat: 6, inEnding: true, melodyInEnding: true });
+
+    // Casa 2 apenas na melodia (sem block.ending): melodyInEnding = true no último compasso
+    const melEndSong = makeSong();
+    melEndSong.bpm = 120;
+    melEndSong.arrangement[0].repeat = 2;
+    const b4 = melEndSong.blocks[melEndSong.arrangement[0].blockId];
+    b4.chords = [makeChord(0, "maj", 4), makeChord(7, "maj", 4)];
+    b4.melody = [makeMelodyNote(60, 0, 4), makeMelodyNote(64, 4, 4)];
+    b4.melodyEnding = [makeMelodyNote(72, 0, 4)];
+    const exMelEnd = expandArrangement(melEndSong);
+    expect(playbackBeatAtSec(exMelEnd, 3)).toMatchObject({ inEnding: false, melodyInEnding: false }); // 1ª repetição (beat 6)
+    expect(playbackBeatAtSec(exMelEnd, 7)).toMatchObject({ inEnding: false, melodyInEnding: true, blockBeat: 6 }); // 2ª repetição (beat 6 >= cut 4)
   });
 });

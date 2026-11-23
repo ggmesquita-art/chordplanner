@@ -1,7 +1,7 @@
 // Modificadores de acorde (DESIGN §3.5, §4): resolução pura de notas, símbolo
 // canônico, conflitos e status de cada nota contra a escala.
 
-import { getQuality, type Chord } from "./chords";
+import { getQuality, isRest, type Chord } from "./chords";
 import type { ScaleContext } from "./diatonic";
 import { mod12, type PitchClass, type Speller } from "./pitch";
 
@@ -68,7 +68,8 @@ export function conflictingModifier(mods: Modifier[], m: Modifier): Modifier | n
 const find = <K extends Modifier["kind"]>(mods: Modifier[], kind: K) =>
   mods.filter((m): m is Extract<Modifier, { kind: K }> => m.kind === kind).map((m) => m.value);
 
-export function chordIntervals(chord: Pick<Chord, "quality" | "modifiers">): number[] {
+export function chordIntervals(chord: Pick<Chord, "quality" | "modifiers" | "rest">): number[] {
+  if (isRest(chord)) return [];
   const q = getQuality(chord.quality);
   const set = new Set(q.intervals);
   const mods = chord.modifiers;
@@ -126,6 +127,7 @@ const ALT_LABEL: Record<AltValue, string> = { b5: "♭5", "#5": "♯5", b9: "♭
 const ALT_ORDER: AltValue[] = ["b5", "#5", "b9", "#9", "#11", "b13"];
 
 export function chordSymbol(chord: Chord, spell: Speller): string {
+  if (isRest(chord)) return "N.C.";
   const mods = chord.modifiers;
   const ext = find(mods, "ext");
   const sus = find(mods, "sus")[0];
@@ -218,6 +220,7 @@ export function noteStatus(chord: Pick<Chord, "root" | "quality">, intervals: nu
 }
 
 export function resolveChord(chord: Chord, ctx: ScaleContext | null, spell: Speller): ResolvedChord {
+  if (isRest(chord)) return { intervals: [], pcs: [], symbol: "N.C.", status: [], bass: null };
   const intervals = chordIntervals(chord);
   return {
     intervals,
@@ -246,12 +249,13 @@ export function modifierStatus(chord: Chord, m: Modifier, ctx: ScaleContext | nu
 
 /** Baixo da n-ésima inversão (0 = fundamental) a partir das notas do acorde. */
 export function inversionBass(chord: Chord, n: number): PitchClass | undefined {
-  if (n === 0) return undefined;
+  if (isRest(chord) || n === 0) return undefined;
   const tones = chordIntervals(chord).map(mod12);
   const ordered = [...new Set(tones)].sort((a, b) => a - b);
   return ordered[n] === undefined ? undefined : mod12(chord.root + ordered[n]);
 }
 
 export function inversionCount(chord: Chord): number {
+  if (isRest(chord)) return 0;
   return new Set(chordIntervals(chord).map(mod12)).size;
 }

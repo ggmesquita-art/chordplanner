@@ -10,13 +10,13 @@
 // Cromáticos: dominante secundária → D (do grau-alvo); ii secundário → SD (prepara o V/x);
 // empréstimos modais → pela tabela acima. Acorde fora da escala e sem função idiomática → null.
 
-import type { Chord, QualityId } from "./chords";
+import { isRest, type Chord, type QualityId } from "./chords";
 import { chordFits, chromaticFunction, tonicChord, type ScaleContext } from "./diatonic";
 import { mod12, type PitchClass } from "./pitch";
 import { WHEEL_RINGS, sliceClickable, sliceState } from "./view";
 
 export type HarmonicFunction = "T" | "SD" | "D";
-type ChordLike = Pick<Chord, "root" | "quality" | "modifiers">;
+type ChordLike = Pick<Chord, "root" | "quality" | "modifiers" | "rest">;
 
 export const FUNCTION_NAME: Record<HarmonicFunction, string> = { T: "Tônica", SD: "Subdominante", D: "Dominante" };
 
@@ -33,6 +33,7 @@ function byInterval(interval: number, quality: QualityId, diatonic: boolean): Ha
 }
 
 export function harmonicFunction(ctx: ScaleContext, chord: ChordLike): HarmonicFunction | null {
+  if (isRest(chord)) return null;
   const iv = new Set(ctx.scale.intervals);
   if (ctx.pcs.length !== 7 || iv.has(3) === iv.has(4) || !iv.has(7)) return null;
   const interval = mod12(chord.root - ctx.tonic);
@@ -124,12 +125,13 @@ const NEXT_FUNCTION: Record<HarmonicFunction, { to: HarmonicFunction; weight: nu
 export function nextChordSuggestions(ctx: ScaleContext, history: Chord[], max = 3): Suggestion[] {
   const iv = new Set(ctx.scale.intervals);
   const rules = iv.has(4) ? MAJOR_RULES : iv.has(3) ? MINOR_RULES : [];
-  const last = history.at(-1);
+  const played = history.filter((c) => !isRest(c));
+  const last = played.at(-1);
   const lastFn = last ? harmonicFunction(ctx, last) : null;
   const lastChromatic = last ? chromaticFunction(ctx, last.root, last.quality) : null;
   const relative = (c: { root: PitchClass }) => mod12(c.root - ctx.tonic);
-  const applicable = rules.filter((r) => (r.from.length ? r.from.length <= history.length : history.length === 0) && r.from.every((p, k) => {
-    const h = history[history.length - r.from.length + k];
+  const applicable = rules.filter((r) => (r.from.length ? r.from.length <= played.length : played.length === 0) && r.from.every((p, k) => {
+    const h = played[played.length - r.from.length + k];
     return matches(p, relative(h), h.quality);
   }));
 

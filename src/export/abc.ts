@@ -1,16 +1,20 @@
-// Export ABC (partitura em texto; abcjs, EasyABC, abc2midi). Duas vozes (V:1 Acordes em clave de sol,
-// V:2 Baixo em clave de fá), arranjo linear (repetições e casa 2 desenroladas), símbolos de acorde entre
-// aspas, ligaduras entre compassos e K:/M:/Q: inline quando o bloco muda.
+// Export ABC (partitura em texto; abcjs, EasyABC, abc2midi).
+// Sem melodia: duas vozes (V:1 Acordes / V:2 Baixo).
+// Com melodia: três vozes (V:1 Melodia / V:2 Acordes / V:3 Baixo), com "N.C." em pausas explícitas e ligaduras entre compassos.
 
+import { isRest } from "../core/chords";
 import {
   AccidentalTracker,
   barCapacity,
   barCells,
   buildSegments,
   chordParts,
+  melodyBarCells,
   spellChordNotes,
+  spellMelodyNote,
   toAscii,
   type Cell,
+  type MelodyCell,
   type NotationOptions,
   type Segment,
   type SpelledNote,
@@ -39,13 +43,16 @@ const tempoField = (seg: Segment) => `Q:1/${seg.meter[1]}=${seg.bpm}`;
 export function songToAbc(song: Song, opts: AbcOptions = {}): string {
   const segments = buildSegments(song, opts);
   const title = (opts.title?.trim() || "Chordplanner").replace(/[\r\n]+/g, " ");
+  const hasMelody = segments.some((s) => s.hasMelody);
 
   // Unidade de nota (L:) comum: maior potência de 2 (até 1/4) que divide todas as durações e capacidades de compasso.
   let g = 0;
   const cellsOf = segments.map((s) => s.bars.map((b) => barCells(b, s.meter)));
+  const melCellsOf = hasMelody ? segments.map((s) => s.melodyBars.map((b) => melodyBarCells(b, s.meter))) : [];
   segments.forEach((s, i) => {
     g = gcd(g, barCapacity(s.meter));
     for (const bar of cellsOf[i]) for (const c of bar) g = gcd(g, c.durDiv);
+    if (hasMelody) for (const bar of melCellsOf[i]) for (const c of bar) g = gcd(g, c.durDiv);
   });
   let unit = 1;
   while (g > 0 && g % (unit * 2) === 0 && unit * 2 <= MAX_UNIT) unit *= 2;
@@ -58,14 +65,14 @@ export function songToAbc(song: Song, opts: AbcOptions = {}): string {
     `M:${first ? first.meter.join("/") : "4/4"}`,
     `L:1/${64 / unit}`,
     ...(first ? [tempoField(first)] : []),
-    "%%score {1 | 2}",
-    'V:1 clef=treble name="Acordes"',
-    'V:2 clef=bass name="Baixo"',
+    ...(hasMelody
+      ? ["%%score {1 | 2 | 3}", 'V:1 clef=treble name="Melodia"', 'V:2 clef=treble name="Acordes"', 'V:3 clef=bass name="Baixo"']
+      : ["%%score {1 | 2}", 'V:1 clef=treble name="Acordes"', 'V:2 clef=bass name="Baixo"']),
     `K:${first ? first.sig.abc : "C"}`,
   ];
 
   const body: string[] = [];
-  const trackers = [new AccidentalTracker(0), new AccidentalTracker(0)];
+  const trackers = hasMelody ? [new AccidentalTracker(0), new AccidentalTracker(0), new AccidentalTracker(0)] : [new AccidentalTracker(0), new AccidentalTracker(0)];
   let prev: Segment | null = null;
 
   segments.forEach((seg, si) => {
@@ -77,24 +84,40 @@ export function songToAbc(song: Song, opts: AbcOptions = {}): string {
     }
     trackers.forEach((t) => t.setKey(seg.sig.fifths));
 
-    // Barras de cada voz.
+    const melodyBarsOut: string[] = [];
     const treble: string[] = [];
     const bass: string[] = [];
     cellsOf[si].forEach((cells, bi) => {
       trackers.forEach((t) => t.startBar());
-      const render = (voice: 0 | 1): string =>
-        cells
-          .map((cell, ci) => cellAbc(cell, voice, seg, trackers[voice], mult, bi === 0 && ci === 0 ? seg.label : undefined))
-          .join(" ");
-      treble.push(render(0));
-      bass.push(render(1));
+      if (hasMelody) {
+        const mCells = melCellsOf[si]?.[bi] ?? [];
+        melodyBarsOut.push(
+          mCells
+            .map((cell, ci) => melodyCellAbc(cell, seg, trackers[0], mult, bi === 0 && ci === 0 ? seg.label : undefined))
+            .join(" "),
+        );
+        treble.push(cells.map((cell) => cellAbc(cell, 0, seg, trackers[1], mult, undefined)).join(" "));
+        bass.push(cells.map((cell) => cellAbc(cell, 1, seg, trackers[2], mult)).join(" "));
+      } else {
+        const render = (voice: 0 | 1): string =>
+          cells
+            .map((cell, ci) => cellAbc(cell, voice, seg, trackers[voice], mult, bi === 0 && ci === 0 ? seg.label : undefined))
+            .join(" ");
+        treble.push(render(0));
+        bass.push(render(1));
+      }
     });
 
+    const inlineNoQ = inline.filter((f) => !f.startsWith("[Q:"));
     for (let i = 0; i < treble.length; i += BARS_PER_LINE) {
       const last = si === segments.length - 1 && i + BARS_PER_LINE >= treble.length;
       const end = last ? "|]" : "|";
       const chunk = (bars: string[], fields: string[]) => (i === 0 && fields.length ? fields.join("") + " " : "") + bars.slice(i, i + BARS_PER_LINE).join(" | ") + " " + end;
-      body.push("V:1", chunk(treble, inline), "V:2", chunk(bass, inline.filter((f) => !f.startsWith("[Q:"))));
+      if (hasMelody) {
+        body.push("V:1", chunk(melodyBarsOut, inline), "V:2", chunk(treble, inlineNoQ), "V:3", chunk(bass, inlineNoQ));
+      } else {
+        body.push("V:1", chunk(treble, inline), "V:2", chunk(bass, inlineNoQ));
+      }
     }
     prev = seg;
   });
@@ -102,10 +125,34 @@ export function songToAbc(song: Song, opts: AbcOptions = {}): string {
   return [...head, ...body].join("\n") + "\n";
 }
 
+function melodyCellAbc(
+  cell: MelodyCell,
+  seg: Segment,
+  tracker: AccidentalTracker,
+  mult: (d: number) => string,
+  sectionLabel?: string,
+): string {
+  const len = mult(cell.durDiv);
+  const pre = sectionLabel ? quoted(`^${sectionLabel}`) : "";
+  if (cell.pitch === undefined) return `${pre}z${len}`;
+  const n = spellMelodyNote(cell.pitch, seg.spell);
+  const state = tracker.use(n);
+  const show = cell.tieIn && cell.startDiv === 0 ? n.alter !== tracker.keyAlter(n.letter) : state;
+  return `${pre}${abcPitch(n, show)}${len}${cell.tieOut ? "-" : ""}`;
+}
+
 function cellAbc(cell: Cell, voice: 0 | 1, seg: Segment, tracker: AccidentalTracker, mult: (d: number) => string, sectionLabel?: string): string {
   const len = mult(cell.durDiv);
   if (!cell.ref) return `z${len}`;
-  const { chord, voiced } = cell.ref;
+  const { chord, voiced, isPadding } = cell.ref;
+  if (isRest(chord)) {
+    let pre = "";
+    if (voice === 0 && cell.first) {
+      if (sectionLabel) pre += quoted(`^${sectionLabel}`);
+      if (!isPadding) pre += quoted("N.C.");
+    }
+    return `${pre}z${len}`;
+  }
   const midis = voice === 1 ? voiced.slice(0, 1) : voiced.slice(1);
   let pre = "";
   if (voice === 0 && cell.first) {

@@ -57,7 +57,7 @@ export function ResizeHandle({ label, duration, unit, onLive, onCommit }: Props)
       aria-label={`Duração de ${label}`}
       aria-orientation="horizontal"
       aria-valuenow={duration}
-      aria-valuemin={0.5}
+      aria-valuemin={0.25}
       aria-valuemax={64}
       aria-valuetext={`${duration} ${duration === 1 ? "tempo" : "tempos"}`}
       title="Arraste para mudar a duração (ou use as setas)"

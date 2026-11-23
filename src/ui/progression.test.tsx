@@ -26,7 +26,7 @@ function setup(n = 3) {
   const s = useStore.getState();
   act(() => {
     s.setTonic(0);
-    useStore.getState().setStartWithSelected(true);
+    useStore.getState().setStartWithSelected(false);
     useStore.getState().clearBlock();
     for (let i = 0; i < n; i++) useStore.getState().addChord(i % 2 ? 7 : 0, "maj");
   });
@@ -62,7 +62,7 @@ describe("progressão", () => {
     setup(1);
     act(() => useStore.getState().setDuration(chords()[0].id, 4));
     render(<Progression />);
-    const handle = screen.getAllByRole("slider")[0];
+    const handle = screen.getAllByRole("slider", { name: /^Duração de / })[0];
     expect(handle.getAttribute("aria-valuenow")).toBe("4");
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(chords()[0].duration).toBe(5);
@@ -152,14 +152,14 @@ describe("alça, teclas e camadas de Esc", () => {
     const seen: string[] = [];
     const on = (e: KeyboardEvent) => seen.push(e.key);
     window.addEventListener("keydown", on);
-    const handle = screen.getAllByRole("slider")[0];
+    const handle = screen.getAllByRole("slider", { name: /^Duração de / })[0];
     fireEvent.keyDown(handle, { key: "z", ctrlKey: true });
     fireEvent.keyDown(handle, { key: " " });
     fireEvent.keyDown(handle, { key: "Delete" });
     window.removeEventListener("keydown", on);
     expect(seen).toEqual(["z", " "]);
     expect(chords()).toHaveLength(2);
-    expect(handle.getAttribute("aria-valuemin")).toBe("0.5");
+    expect(handle.getAttribute("aria-valuemin")).toBe("0.25");
   });
 
   it("− fica desabilitado quando a duração já é o mínimo da grade", () => {
@@ -175,7 +175,7 @@ describe("alça, teclas e camadas de Esc", () => {
     setup(2);
     render(<Progression />);
     const cards = screen.getAllByRole("listitem");
-    const handle = screen.getAllByRole("slider")[0];
+    const handle = screen.getAllByRole("slider", { name: /^Duração de / })[0];
     handle.parentElement!.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
     fireEvent.pointerDown(handle, { button: 2, pointerType: "mouse" });
     expect(cards[0].getAttribute("draggable")).toBe("true");
@@ -189,7 +189,7 @@ describe("alça, teclas e camadas de Esc", () => {
   it("desmontar no meio do arraste não deixa o estado preso", () => {
     setup(2);
     render(<Progression />);
-    const handle = screen.getAllByRole("slider")[0];
+    const handle = screen.getAllByRole("slider", { name: /^Duração de / })[0];
     handle.parentElement!.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
     fireEvent.pointerDown(handle, { button: 0, pointerType: "mouse" });
     act(() => useStore.getState().removeChord(chords()[0].id));
@@ -248,5 +248,69 @@ describe("casa 2", () => {
     render(<Progression />);
     expect(screen.queryByText("+ Casa 2")).toBeNull();
     expect(screen.getByRole("button", { name: "Casa 2" })).toBeTruthy();
+  });
+});
+
+describe("respiro (N.C.), faixa vazia, ModifierPanel e mixer de acordes", () => {
+  it("+ Respiro (N.C.) adiciona card N.C. e ModifierPanel oferece conversão/remoção", () => {
+    setup(1);
+    render(
+      <>
+        <Progression />
+        <ModifierPanel />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ Respiro (N.C.)" }));
+    expect(chords()).toHaveLength(2);
+    expect(chords()[1].rest).toBe(true);
+    expect(screen.getAllByRole("listitem")[1].classList.contains("rest")).toBe(true);
+    expect(screen.getAllByText("N.C.")).toHaveLength(2);
+    expect(screen.getByText(/Respiro harmônico/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Converter em acorde" }));
+    expect(chords()[1].rest).toBeUndefined();
+    expect(screen.queryByText(/Respiro harmônico/)).toBeNull();
+  });
+
+  it("clicar em tempo vazio na faixa de acordes preenche o vão anterior com N.C.", () => {
+    setup(1);
+    act(() => useStore.getState().setDuration(chords()[0].id, 2));
+    render(<Progression />);
+    const emptyLane = screen.getByTestId("empty-beats-lane");
+    emptyLane.getBoundingClientRect = () => ({ left: 0, width: 784, top: 0, height: 80 }) as DOMRect;
+    // Clique 2 tempos à direita (2 * 56px = 112px -> vão de 2 tempos preenchido com N.C.).
+    fireEvent.click(emptyLane, { clientX: 112 });
+    expect(chords()).toHaveLength(2);
+    expect(chords()[1].rest).toBe(true);
+    expect(chords()[1].duration).toBe(2);
+  });
+
+  it("controles M / S / Volume de acordes atualizam mixer.chords no store", () => {
+    setup(1);
+    render(<Progression />);
+    fireEvent.click(screen.getByRole("button", { name: "Silenciar Acordes" }));
+    expect(useStore.getState().mixer.chords.muted).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Solo Acordes" }));
+    expect(useStore.getState().mixer.chords.solo).toBe(true);
+    fireEvent.change(screen.getByRole("slider", { name: "Volume de Acordes" }), { target: { value: "0.7" } });
+    expect(useStore.getState().mixer.chords.volume).toBeCloseTo(0.7);
+  });
+
+  it("checkbox Iniciar com o acorde selecionado controla inserção automática da tônica ao criar novo bloco", () => {
+    act(() => {
+      useStore.getState().setTonic(0);
+      useStore.getState().setStartWithSelected(false);
+    });
+    render(<Progression />);
+    const checkbox = screen.getByRole("checkbox", { name: /Iniciar com o acorde selecionado/ }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    act(() => useStore.getState().addBlock());
+    expect(chords()).toEqual([]);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    act(() => useStore.getState().addBlock());
+    expect(chords().map((c) => [c.root, c.quality])).toEqual([[0, "maj"]]);
   });
 });

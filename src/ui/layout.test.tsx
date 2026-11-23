@@ -16,7 +16,7 @@ vi.mock("../audio/engine", () => ({
 }));
 
 import { expandArrangement, makeSong } from "../core/song";
-import { LocalSongRepository } from "../state/repository";
+import { DEFAULT_DOCK_PANELS, LocalSongRepository } from "../state/repository";
 import { selectBlock, useStore } from "../state/store";
 import { MiniDock } from "./Layout/Dock";
 import { TopBar } from "./Layout/TopBar";
@@ -24,7 +24,14 @@ import { TopBar } from "./Layout/TopBar";
 beforeEach(() => {
   useStore.getState().newSong();
   useStore.getState().setTonic(0);
-  useStore.setState({ topBar: "pinned", dock: "full", playing: false, playhead: null });
+  useStore.setState({
+    topBar: "pinned",
+    dock: "full",
+    dockPanels: { ...DEFAULT_DOCK_PANELS },
+    melodyCompact: false,
+    playing: false,
+    playhead: null,
+  });
 });
 afterEach(() => {
   cleanup();
@@ -105,12 +112,28 @@ describe("TopBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "📌 Fixar" }));
     expect(useStore.getState().topBar).toBe("pinned");
   });
+
+  it("clicar dentro do seletor de instrumento global em portal não fecha o TopBar automático", () => {
+    useStore.setState({ topBar: "auto" });
+    render(<TopBar />);
+    fireEvent.click(screen.getByRole("button", { name: "▾ Mostrar controles" }));
+    expect(panel().hasAttribute("inert")).toBe(false);
+
+    const pickerBtn = panel().querySelector<HTMLButtonElement>(".inst-picker .picker-button")!;
+    fireEvent.click(pickerBtn);
+    const portal = document.body.querySelector<HTMLElement>('.inst-popover-portal[data-popover-owner="topbar"]')!;
+    expect(portal).toBeTruthy();
+
+    fireEvent.pointerDown(portal);
+    expect(panel().hasAttribute("inert")).toBe(false);
+    expect(document.body.querySelector(".inst-popover-portal")).toBeTruthy();
+  });
 });
 
 describe("MiniDock", () => {
-  // Definir a tônica já pôs o acorde I no bloco vazio: C, Am, F, G.
   const addChords = () => {
     const s = useStore.getState();
+    s.addChord(0, "maj");
     for (const root of [9, 5, 7]) s.addChord(root, root === 9 ? "m" : "maj");
   };
 
@@ -163,13 +186,38 @@ describe("MiniDock", () => {
 });
 
 describe("preferências de layout na sessão", () => {
-  it("topBar/dock fazem ida e volta; valores inválidos viram o padrão", () => {
+  it("topBar/dock/dockPanels/melodyCompact fazem ida e volta; valores inválidos viram o padrão", () => {
     localStorage.clear();
     const repo = new LocalSongRepository();
     const base = { version: 1, scaleId: "major", tonic: 0, accidentals: "auto", mode: "colorful", startWithSelected: false, soundOnClick: true, metronome: false, followScale: false, song: makeSong() };
-    localStorage.setItem("chordplanner:session", JSON.stringify({ ...base, topBar: "auto", dock: "compact" }));
-    expect(repo.loadSession()).toMatchObject({ topBar: "auto", dock: "compact" });
-    localStorage.setItem("chordplanner:session", JSON.stringify({ ...base, topBar: "x", dock: 3 }));
-    expect(repo.loadSession()).toMatchObject({ topBar: "pinned", dock: "full" });
+    localStorage.setItem(
+      "chordplanner:session",
+      JSON.stringify({
+        ...base,
+        topBar: "auto",
+        dock: "compact",
+        melodyCompact: true,
+        timelineFit: true,
+        dockPanels: { arrangement: false, melody: true, progression: false },
+      }),
+    );
+    expect(repo.loadSession()).toMatchObject({
+      topBar: "auto",
+      dock: "compact",
+      melodyCompact: true,
+      timelineFit: true,
+      dockPanels: { arrangement: false, melody: true, progression: false },
+    });
+    localStorage.setItem(
+      "chordplanner:session",
+      JSON.stringify({ ...base, topBar: "x", dock: 3, melodyCompact: "yes", timelineFit: "yes", dockPanels: { arrangement: "no", melody: 1 } }),
+    );
+    expect(repo.loadSession()).toMatchObject({
+      topBar: "pinned",
+      dock: "full",
+      melodyCompact: false,
+      timelineFit: false,
+      dockPanels: DEFAULT_DOCK_PANELS,
+    });
   });
 });

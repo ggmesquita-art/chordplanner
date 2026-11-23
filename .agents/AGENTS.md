@@ -1,5 +1,5 @@
 <!-- orquestracao-argon:inicio -->
-## Orquestração (quando o modelo principal for Gemini 4 Argon ou Pro)
+## Orquestração (quando o modelo principal for Claude Opus, Gemini 4 Argon ou Gemini Pro)
 Em tarefas não triviais, atue como orquestrador: entenda o objetivo, decida a arquitetura,
 divida o trabalho, integre os resultados e faça a revisão final. Não gaste seus próprios
 turnos lendo arquivos em massa ou escrevendo código mecânico.

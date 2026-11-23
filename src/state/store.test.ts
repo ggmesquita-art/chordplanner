@@ -1,11 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTRUMENTS, hasInstrument } from "../audio/instruments";
 import { FAMILY_SUGGESTIONS, SCALE_SUGGESTIONS, suggestionsFor } from "../audio/scaleInstruments";
+import { isRest } from "../core/chords";
 import { SCALES } from "../core/scales";
 import { makeSong } from "../core/song";
 import { sanitizeContent } from "../export/json";
 import { repository } from "./repository";
-import { blockKey, contentHash, normalizeHash, selectBlock, selectBlockCtx, selectDirty, selectEditChords, selectRegion, useStore } from "./store";
+import {
+  DEFAULT_MIXER,
+  blockKey,
+  contentHash,
+  normalizeHash,
+  selectBlock,
+  selectBlockCtx,
+  selectDirty,
+  selectEditChords,
+  selectEditMelody,
+  selectRegion,
+  useStore,
+} from "./store";
 
 describe("instrumentos (§5.2–5.3)", () => {
   it("ids únicos e tessituras válidas", () => {
@@ -34,27 +47,47 @@ describe("instrumentos (§5.2–5.3)", () => {
 
 describe("store", () => {
   beforeEach(() => {
-    useStore.setState({ song: makeSong(), tonic: null, scaleId: "major", startWithSelected: false, selectedItem: 0, selectedChord: null, past: [], future: [] });
+    useStore.setState({
+      song: makeSong(),
+      tonic: null,
+      scaleId: "major",
+      grid: "bar",
+      melodyGrid: 0.5,
+      mixer: structuredClone(DEFAULT_MIXER),
+      startWithSelected: false,
+      selectedItem: 0,
+      selectedChord: null,
+      selectedMelodyNote: null,
+      past: [],
+      future: [],
+    });
   });
 
   const chords = () => selectBlock(useStore.getState())!.chords;
 
-  it("ao definir a tônica, a progressão começa com o acorde da tônica", () => {
+  it("com o checkbox desmarcado (padrão), definir a tônica e criar um novo bloco começam vazios", () => {
     useStore.getState().setTonic(2);
-    expect(chords().map((c) => [c.root, c.quality])).toEqual([[2, "maj"]]);
-  });
-
-  it("com o checkbox marcado, começa vazia e o primeiro clique abre a progressão", () => {
-    useStore.setState({ startWithSelected: true });
-    useStore.getState().setTonic(0);
     expect(chords()).toEqual([]);
+    useStore.getState().addBlock();
+    expect(chords()).toEqual([]);
+    expect(useStore.getState().selectedChord).toBeNull();
     useStore.getState().addChord(5, "maj");
     expect(chords().map((c) => c.root)).toEqual([5]);
+  });
+
+  it("com o checkbox marcado, definir a tônica, limpar e criar novo bloco iniciam com a tônica", () => {
+    useStore.setState({ startWithSelected: true });
+    useStore.getState().setTonic(2);
+    expect(chords().map((c) => [c.root, c.quality])).toEqual([[2, "maj"]]);
+    useStore.getState().addBlock();
+    expect(chords().map((c) => [c.root, c.quality])).toEqual([[2, "maj"]]);
+    expect(useStore.getState().selectedChord).toBe(chords()[0].id);
   });
 
   it("trocar a tônica transpõe mantendo os graus; desfazer volta", () => {
     const s = useStore.getState();
     s.setTonic(0);
+    s.addChord(0, "maj");
     s.addChord(7, "maj");
     useStore.getState().setTonic(2);
     expect(chords().map((c) => c.root)).toEqual([2, 9]);
@@ -62,10 +95,15 @@ describe("store", () => {
     expect(chords().map((c) => c.root)).toEqual([0, 7]);
   });
 
-  it("limpar com checkbox desmarcado recoloca a tônica", () => {
+  it("limpar com checkbox desmarcado deixa vazio; marcado recoloca a tônica", () => {
     const s = useStore.getState();
     s.setTonic(9);
     useStore.setState({ scaleId: "minor" });
+    s.addChord(5, "maj");
+    useStore.getState().clearBlock();
+    expect(chords()).toEqual([]);
+
+    useStore.setState({ startWithSelected: true });
     s.addChord(5, "maj");
     useStore.getState().clearBlock();
     expect(chords().map((c) => [c.root, c.quality])).toEqual([[9, "m"]]);
@@ -74,7 +112,7 @@ describe("store", () => {
   it("jazzificar aplica a 7ª diatônica de cada grau", () => {
     const s = useStore.getState();
     s.setTonic(0);
-    for (const [r, q] of [[2, "m"], [7, "maj"], [11, "dim"]] as const) useStore.getState().addChord(r, q);
+    for (const [r, q] of [[0, "maj"], [2, "m"], [7, "maj"], [11, "dim"]] as const) useStore.getState().addChord(r, q);
     useStore.getState().applyPreset("jazzify");
     const exts = chords().map((c) => c.modifiers.map((m) => m.value).join());
     expect(exts).toEqual(["maj7", "7", "7", "7"]);
@@ -110,6 +148,7 @@ describe("store", () => {
     s.newSong();
     expect(selectDirty(useStore.getState())).toBe(false);
     useStore.getState().setTonic(2);
+    useStore.getState().addChord(2, "maj");
     expect(selectDirty(useStore.getState())).toBe(true);
 
     useStore.getState().renameSong("Balada em Ré");
@@ -142,6 +181,7 @@ describe("store", () => {
 
   it("desfazer/refazer restaura tônica e fundamentais", () => {
     useStore.getState().setTonic(0);
+    useStore.getState().addChord(0, "maj");
     useStore.getState().addChord(7, "maj");
     useStore.getState().setTonic(2);
     useStore.getState().undo();
@@ -242,6 +282,7 @@ describe("store", () => {
     const st = useStore.getState();
     st.newSong();
     st.setTonic(0);
+    st.addChord(0, "maj");
     st.addChord(5, "maj");
     st.addChord(7, "maj");
     const ids = selectBlock(useStore.getState())!.chords.map((c) => c.id);
@@ -268,6 +309,7 @@ describe("store", () => {
     const st = useStore.getState();
     st.newSong();
     st.setTonic(0);
+    st.addChord(0, "maj");
     st.addChord(7, "maj");
     const ids = selectBlock(useStore.getState())!.chords.map((c) => c.id);
     useStore.getState().selectChord(ids[0]);
@@ -376,6 +418,7 @@ describe("renameSong", () => {
     const st = useStore.getState();
     st.newSong();
     st.setTonic(0);
+    st.addChord(0, "maj");
     const id = selectBlock(useStore.getState())!.id;
     const b = () => selectBlock(useStore.getState())!;
     useStore.getState().setBlockProps(id, { bassInstrument: "nao-existe", drone: true, rampTo: 999, key: { tonic: 14, scaleId: "major" } });
@@ -396,6 +439,7 @@ describe("renameSong", () => {
   it("modulação: contexto do bloco, acorde da tônica do bloco e transposição que leva as tonalidades junto", () => {
     const st = useStore.getState();
     st.newSong();
+    useStore.setState({ startWithSelected: true });
     st.setTonic(0);
     st.addBlock();
     const id = selectBlock(useStore.getState())!.id;
@@ -409,12 +453,14 @@ describe("renameSong", () => {
     expect(selectBlock(useStore.getState())!.chords[0].root).toBe(6);
     useStore.getState().selectItem(0);
     expect(selectBlockCtx(useStore.getState())!.tonic).toBe(2);
+    useStore.setState({ startWithSelected: false });
   });
 
   it("casa 2: as ações de edição atuam na casa 2 e a casa vazia some", () => {
     const st = useStore.getState();
     st.newSong();
     st.setTonic(0);
+    st.addChord(0, "maj");
     useStore.getState().setEditEnding(true);
     useStore.getState().addChord(7, "maj");
     useStore.getState().addChord(0, "maj");
@@ -442,6 +488,7 @@ describe("casa 2: seleção e clonagem", () => {
     const st = useStore.getState();
     st.newSong();
     st.setTonic(0);
+    st.addChord(0, "maj");
   });
   const enterEnding = () => {
     useStore.getState().setEditEnding(true);
@@ -524,6 +571,107 @@ describe("casa 2: seleção e clonagem", () => {
     expect(chordsOf().at(-1)!.modifiers).toEqual([{ kind: "ext", value: 7 }]);
     useStore.getState().undo();
     expect(chordsOf().map((c) => c.root)).toEqual([0]);
+  });
+});
+
+describe("Etapa 6 (melodia, durações menores e N.C. no store)", () => {
+  beforeEach(() => {
+    useStore.setState({
+      song: makeSong(),
+      tonic: null,
+      scaleId: "major",
+      grid: "bar",
+      melodyGrid: 0.5,
+      mixer: structuredClone(DEFAULT_MIXER),
+      startWithSelected: false,
+      selectedItem: 0,
+      selectedChord: null,
+      selectedMelodyNote: null,
+      editEnding: false,
+      past: [],
+      future: [],
+    });
+  });
+
+  it("addChord usa a duração da grade ativa e setDuration aceita 0.25", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().setGrid(0.25);
+    const c = useStore.getState().addChord(5, "maj")!;
+    expect(c.duration).toBe(0.25);
+    useStore.getState().setGrid(0.5);
+    const c2 = useStore.getState().addChord(7, "maj")!;
+    expect(c2.duration).toBe(0.5);
+    useStore.getState().setDuration(c2.id, 0.1);
+    expect(chordsOf().find((x) => x.id === c2.id)?.duration).toBe(0.25);
+  });
+
+  it("addRest, toggleRest e insertChordAtBeat preenchem lacunas com N.C.", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().setGrid(1);
+    useStore.getState().addChord(0, "maj");
+    const inserted = useStore.getState().insertChordAtBeat(4, { root: 7, quality: "maj", duration: 2 })!;
+    expect(chordsOf().map((c) => [isRest(c), c.duration, c.root])).toEqual([
+      [false, 1, 0],
+      [true, 3, 0],
+      [false, 2, 7],
+    ]);
+    useStore.getState().addRest(1);
+    expect(isRest(chordsOf().at(-1))).toBe(true);
+    useStore.getState().toggleRest(inserted.id);
+    expect(isRest(chordsOf().find((c) => c.id === inserted.id))).toBe(true);
+    useStore.getState().undo();
+    expect(isRest(chordsOf().find((c) => c.id === inserted.id))).toBe(false);
+  });
+
+  it("setTonic transpõe melodia junto e ignora acordes N.C.", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().addChord(0, "maj");
+    useStore.getState().addRest(2);
+    useStore.getState().upsertMelodyNote({ pitch: 60, start: 0, duration: 1 });
+    useStore.getState().upsertMelodyNote({ pitch: 64, start: 1, duration: 1 });
+    useStore.getState().setTonic(2);
+    expect(selectEditMelody(useStore.getState()).map((n) => n.pitch)).toEqual([62, 66]);
+    expect(isRest(chordsOf()[1])).toBe(true);
+    expect(chordsOf()[1].root).toBe(0);
+    useStore.getState().undo();
+    expect(selectEditMelody(useStore.getState()).map((n) => n.pitch)).toEqual([60, 64]);
+  });
+
+  it("snapBlockMelodyToScale ajusta notas fora e ignora ids no contentHash", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().upsertMelodyNote({ pitch: 61, start: 0, duration: 1 });
+    useStore.getState().snapBlockMelodyToScale();
+    expect(selectEditMelody(useStore.getState()).map((n) => n.pitch)).toEqual([60]);
+
+    const s = useStore.getState();
+    const h1 = contentHash(s);
+    const cloned = structuredClone(s.song);
+    Object.values(cloned.blocks)[0].melody![0].id = "outro-id";
+    expect(contentHash({ ...s, song: cloned })).toBe(h1);
+  });
+
+  it("makeUnique clona melodia e melodyEnding com novos ids", () => {
+    useStore.getState().setTonic(0);
+    useStore.getState().upsertMelodyNote({ pitch: 60, start: 0, duration: 1 });
+    useStore.getState().setEditEnding(true);
+    useStore.getState().upsertMelodyNote({ pitch: 67, start: 0, duration: 1 });
+    useStore.getState().setEditEnding(false);
+    useStore.getState().addLinkedInstance(0);
+    useStore.getState().makeUnique(1);
+    const blocks = Object.values(useStore.getState().song.blocks);
+    expect(blocks[0].melody![0].id).not.toBe(blocks[1].melody![0].id);
+    expect(blocks[0].melodyEnding![0].id).not.toBe(blocks[1].melodyEnding![0].id);
+  });
+
+  it("setMelodyInstrument e setBlockProps validam melodia e mixer", () => {
+    useStore.getState().setMelodyInstrument("flute");
+    expect(useStore.getState().song.melodyInstrument).toBe("flute");
+    const id = selectBlock(useStore.getState())!.id;
+    useStore.getState().setBlockProps(id, { melodyInstrument: "violin", melodyMidiChannel: 99 });
+    expect(selectBlock(useStore.getState())!.melodyInstrument).toBe("violin");
+    expect(selectBlock(useStore.getState())!.melodyMidiChannel).toBe(16);
+    useStore.getState().setTrackMix("melody", { volume: 3, muted: true });
+    expect(useStore.getState().mixer.melody).toEqual({ volume: 1.5, muted: true, solo: false });
   });
 });
 

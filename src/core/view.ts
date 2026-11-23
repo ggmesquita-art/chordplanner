@@ -1,6 +1,6 @@
 // Cálculos musicais de apresentação: a UI só consome estas funções puras (DESIGN §7).
 
-import { makeChord, type Chord, type QualityId } from "./chords";
+import { isRest, makeChord, type Chord, type QualityId } from "./chords";
 import { chordFits, chromaticFunction, romanFor, type ChromaticFunction, type DegreeInfo, type ScaleContext } from "./diatonic";
 import { chordIntervals, inversionBass, type NoteStatus, type ResolvedChord } from "./modifiers";
 import { fifthsPosition, makeSpeller, mod12, type AccidentalPref, type PitchClass } from "./pitch";
@@ -97,8 +97,8 @@ export function wheelCounts(ctx: ScaleContext): { diatonic: number; chromatic: n
 }
 
 /** Classes de pitch do acorde (com modificadores). */
-export const chordPitchClasses = (chord: Pick<Chord, "root" | "quality" | "modifiers">): PitchClass[] =>
-  chordIntervals(chord).map((i) => mod12(chord.root + i));
+export const chordPitchClasses = (chord: Pick<Chord, "root" | "quality" | "modifiers" | "rest">): PitchClass[] =>
+  isRest(chord) ? [] : chordIntervals(chord).map((i) => mod12(chord.root + i));
 
 /** Dados do centro da roda em hover: acorde, notas, função romana e notas comuns ao acorde anterior. */
 export function hoverChordInfo(
@@ -108,7 +108,7 @@ export function hoverChordInfo(
 ): { chord: Chord; pcs: PitchClass[]; roman: string; shared: PitchClass[] | null } {
   const chord = makeChord(hover.root, hover.quality);
   const pcs = chordPitchClasses(chord);
-  const prevPcs = previous ? new Set(chordPitchClasses(previous)) : null;
+  const prevPcs = previous && !isRest(previous) ? new Set(chordPitchClasses(previous)) : null;
   return {
     chord,
     pcs,
@@ -153,7 +153,7 @@ export function midiStatus(resolved: ResolvedChord, midi: number): NoteStatus {
 
 /** Notas do preview: o acorde selecionado ou, sem ele, a tríade da tônica (qualidade primária, padrão maior). */
 export function previewChordNotes(selected: Chord | null, tonic: PitchClass | null, ctx: ScaleContext | null): number[] {
-  const chord = selected ?? makeChord(tonic ?? 0, ctx?.degrees[0]?.primary ?? "maj");
+  const chord = selected && !isRest(selected) ? selected : makeChord(tonic ?? 0, ctx?.degrees[0]?.primary ?? "maj");
   return voiceChord(chord);
 }
 
@@ -172,11 +172,12 @@ export function chordStarts(chords: Pick<Chord, "duration">[]): number[] {
 
 /** Notas fora da tessitura (omitidas na reprodução) de cada acorde, por id. */
 export function droppedByChord(chords: Chord[], range: [number, number]): Map<string, number> {
-  return new Map(chords.map((c) => [c.id, fitToRange(voiceChord(c), range).dropped]));
+  return new Map(chords.map((c) => [c.id, isRest(c) ? 0 : fitToRange(voiceChord(c), range).dropped]));
 }
 
 /** Papel do acorde na escala: dentro, cromático (dominante secundária/empréstimo) ou fora, e o romano. */
 export function chordRole(ctx: ScaleContext | null, chord: Chord): { inScale: boolean; chromatic: ChromaticFunction | null; roman: string } {
+  if (isRest(chord)) return { inScale: true, chromatic: null, roman: "" };
   const inScale = !ctx || chordFits(chord.root, chord.quality, ctx.pcSet);
   const chromatic = ctx && !inScale ? chromaticFunction(ctx, chord.root, chord.quality) : null;
   const roman = ctx ? chromatic?.label ?? romanFor(ctx, chord.root, chord.quality) : "";

@@ -2,20 +2,42 @@
 // o histórico para desfazer/refazer.
 
 import { create } from "zustand";
-import { makeChord, newChordId, type Chord, type QualityId, type VoicingId } from "../core/chords";
+import { DEFAULT_MIXER, type MixerState, type TrackBus, type TrackMix } from "../audio/status";
+import { isRest, makeChord, makeRest, newChordId, type Chord, type QualityId, type VoicingId } from "../core/chords";
 import { hasInstrument } from "../audio/instruments";
 import { chordFits, scaleContext, tonicChord, type ScaleContext } from "../core/diatonic";
+import {
+  makeMelodyNote,
+  newMelodyNoteId,
+  shortestTransposeDelta,
+  snapMelodyToScale,
+  transposeMelody,
+  upsertMelodyNote as upsertMelodyList,
+  type MelodyNote,
+} from "../core/melody";
 import { toggleModifier, type Modifier } from "../core/modifiers";
 import { mod12, type AccidentalPref, type PitchClass } from "../core/pitch";
 import { getScale, SCALES } from "../core/scales";
-import { makeBlock, makeSong, newId, type Block, type PlaybackPattern, type Song } from "../core/song";
+import { makeBlock, makeSong, newId, type Block, type InstrumentId, type PlaybackPattern, type Song } from "../core/song";
 import { buildTemplate, type TemplateId } from "../core/templates";
-import type { Grid, Meter } from "../core/timeline";
+import { gridBeats, type Grid, type Meter } from "../core/timeline";
 import { suggestionsFor } from "../audio/scaleInstruments";
 import { DEFAULT_MIDI, type MidiSettings } from "../audio/midi";
 import { sanitizeContent, type SongContent } from "../export/json";
 import { CURRENT_VERSION } from "../export/migrate";
-import { repository, type RestrictionMode, type SavedSongMeta, type Session, type Theme, type TopBarMode, type DockMode } from "./repository";
+import {
+  DEFAULT_DOCK_PANELS,
+  repository,
+  type DockMode,
+  type DockPanels,
+  type RestrictionMode,
+  type SavedSongMeta,
+  type Session,
+  type Theme,
+  type TopBarMode,
+} from "./repository";
+
+export { DEFAULT_DOCK_PANELS, DEFAULT_MIXER, type DockPanels, type MixerState, type TrackBus, type TrackMix };
 
 export type Playhead = { itemIndex: number; chordIndex: number; eventIndex: number } | null;
 
@@ -34,14 +56,27 @@ const stableStringify = (value: unknown) =>
       : v,
   );
 
-/** Conteúdo que conta como "a música" para salvar e detectar alterações. Ids de acorde e de item não entram (só os de bloco). */
+const stripIds = <T extends { id: string }>(arr?: T[]) => arr?.map(({ id: _id, ...rest }) => rest);
+
+/** Conteúdo que conta como "a música" para salvar e detectar alterações. Ids de acorde, nota e de item não entram (só os de bloco). */
 export const contentHash = (s: { song: Song; scaleId: string; tonic: number | null }) =>
   stableStringify([
     s.scaleId,
     s.tonic,
     {
       ...s.song,
-      blocks: Object.fromEntries(Object.entries(s.song.blocks).map(([k, b]) => [k, { ...b, chords: b.chords.map(({ id: _id, ...c }) => c), ...(b.ending ? { ending: b.ending.map(({ id: _id, ...c }) => c) } : {}) }])),
+      blocks: Object.fromEntries(
+        Object.entries(s.song.blocks).map(([k, b]) => [
+          k,
+          {
+            ...b,
+            chords: stripIds(b.chords),
+            ...(b.ending ? { ending: stripIds(b.ending) } : {}),
+            ...(b.melody ? { melody: stripIds(b.melody) } : {}),
+            ...(b.melodyEnding ? { melodyEnding: stripIds(b.melodyEnding) } : {}),
+          },
+        ]),
+      ),
       arrangement: s.song.arrangement.map(({ id: _id, ...it }) => it),
     },
   ]);
@@ -64,19 +99,46 @@ export function normalizeHash(hash: string | null): string | null {
 /** Estado restaurado por desfazer/refazer: a tonalidade acompanha a música. */
 type Snapshot = { song: Song; tonic: number | null; scaleId: string };
 
-type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "midi" | "countIn" | "grid" | "showDegrees" | "soundOnHover" | "instrumentView" | "theme" | "topBar" | "dock"> & {
+type State = Omit<
+  Session,
+  | "version"
+  | "songId"
+  | "songName"
+  | "savedHash"
+  | "midi"
+  | "countIn"
+  | "grid"
+  | "melodyGrid"
+  | "melodyVisible"
+  | "mixer"
+  | "showDegrees"
+  | "soundOnHover"
+  | "instrumentView"
+  | "theme"
+  | "topBar"
+  | "dock"
+  | "dockPanels"
+  | "melodyCompact"
+  | "timelineFit"
+> & {
   theme: Theme;
   midi: MidiSettings;
   countIn: boolean;
   grid: Grid;
+  melodyGrid: Grid;
+  melodyVisible: boolean;
+  melodyCompact: boolean;
+  timelineFit: boolean;
+  mixer: MixerState;
   showDegrees: boolean;
   soundOnHover: boolean;
   instrumentView: "keyboard" | "guitar";
   topBar: TopBarMode;
   dock: DockMode;
+  dockPanels: DockPanels;
   /** Outra ponta da região selecionada (id de acorde do bloco atual); a primeira é `selectedChord`. */
   regionEnd: string | null;
-  /** A progressão edita a casa 2 do bloco (`block.ending`) em vez dos acordes principais. */
+  /** A progressão edita a casa 2 do bloco (`block.ending` / `block.melodyEnding`) em vez do conteúdo principal. */
   editEnding: boolean;
   songId: string | null;
   songName: string;
@@ -84,6 +146,7 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   savedSongs: SavedSongMeta[];
   selectedItem: number;
   selectedChord: string | null;
+  selectedMelodyNote: string | null;
   past: Snapshot[];
   future: Snapshot[];
   playing: boolean;
@@ -93,6 +156,11 @@ type State = Omit<Session, "version" | "songId" | "songName" | "savedHash" | "mi
   /** Durante a reprodução, a progressão acompanha o bloco que está tocando. */
   followPlayback: boolean;
 };
+
+export type ChordOrRestInput =
+  | Chord
+  | { rest: true; duration?: number }
+  | { root: PitchClass; quality: QualityId; modifiers?: Modifier[]; bass?: PitchClass; duration?: number };
 
 type Actions = {
   setScale: (id: string) => void;
@@ -107,6 +175,14 @@ type Actions = {
   setFollowScale: (v: boolean) => void;
   setCountIn: (v: boolean) => void;
   setGrid: (g: Grid) => void;
+  setMelodyGrid: (g: Grid) => void;
+  setMelodyVisible: (v: boolean) => void;
+  setMelodyCompact: (v: boolean) => void;
+  setTimelineFit: (v: boolean) => void;
+  setDockPanel: (panel: keyof DockPanels, expanded: boolean) => void;
+  toggleDockPanel: (panel: keyof DockPanels) => void;
+  selectMelodyNote: (id: string | null) => void;
+  setTrackMix: (track: TrackBus, patch: Partial<TrackMix>) => void;
   setShowDegrees: (v: boolean) => void;
   setSoundOnHover: (v: boolean) => void;
   setInstrumentView: (v: "keyboard" | "guitar") => void;
@@ -128,7 +204,10 @@ type Actions = {
 
   /** `modifiers` já entram no acorde criado (um único passo de desfazer). */
   /** `bass`: baixo invertido/slash (ex.: acorde tocado no teclado MIDI). */
-  addChord: (root: PitchClass, quality: QualityId, modifiers?: Modifier[], bass?: PitchClass) => Chord | null;
+  addChord: (root: PitchClass, quality: QualityId, modifiers?: Modifier[], bass?: PitchClass, duration?: number) => Chord | null;
+  addRest: (duration?: number) => Chord | null;
+  insertChordAtBeat: (beat: number, chordOrRest: ChordOrRestInput) => Chord | null;
+  toggleRest: (id: string) => void;
   selectChord: (id: string | null) => void;
   removeChord: (id: string) => void;
   duplicateChord: (id: string) => void;
@@ -141,6 +220,20 @@ type Actions = {
   completeBar: () => void;
   applyPreset: (p: "jazzify" | "add9" | "susDominants" | "clear") => void;
 
+  upsertMelodyNote: (note: Omit<MelodyNote, "id"> & { id?: string }) => MelodyNote | null;
+  updateMelodyNote: (id: string, patch: Partial<Pick<MelodyNote, "pitch" | "start" | "duration" | "velocity">>) => void;
+  removeMelodyNote: (id: string) => void;
+  clearMelody: () => void;
+  snapBlockMelodyToScale: () => void;
+  setBlockChords: (chords: Chord[]) => void;
+  applyAIGeneration: (patch: {
+    chords?: Chord[];
+    melody?: MelodyNote[];
+    bassInstrument?: InstrumentId;
+    tonic?: PitchClass;
+    scaleId?: string;
+  }) => void;
+
   selectItem: (i: number) => void;
   addBlock: () => void;
   addLinkedInstance: (i: number) => void;
@@ -151,7 +244,23 @@ type Actions = {
   renameBlock: (blockId: string, name: string) => void;
   setBlockProps: (
     blockId: string,
-    patch: Partial<Pick<Block, "bpm" | "meter" | "pattern" | "instrument" | "midiChannel" | "color" | "bassInstrument" | "drone" | "rampTo" | "key">>,
+    patch: Partial<
+      Pick<
+        Block,
+        | "bpm"
+        | "meter"
+        | "pattern"
+        | "instrument"
+        | "melodyInstrument"
+        | "melodyMidiChannel"
+        | "midiChannel"
+        | "color"
+        | "bassInstrument"
+        | "drone"
+        | "rampTo"
+        | "key"
+      >
+    >,
   ) => void;
   /** Preferências de execução da música inteira. */
   setSongProps: (patch: Partial<Pick<Song, "voiceLeading" | "reattack">>) => void;
@@ -162,6 +271,7 @@ type Actions = {
   setMeter: (m: Meter) => void;
   setSwing: (s: number) => void;
   setInstrument: (id: string) => void;
+  setMelodyInstrument: (id: string) => void;
   setPattern: (p: PlaybackPattern) => void;
 
   undo: () => void;
@@ -198,17 +308,43 @@ function initialState(): State {
     countIn: false,
     song: makeSong(),
   };
-  const { songId = null, songName = UNTITLED, savedHash, midi, countIn = false, grid = 1, showDegrees = true, soundOnHover = false, instrumentView = "keyboard", theme = "auto", topBar = "pinned", dock = "full", ...rest } = base;
+  const {
+    songId = null,
+    songName = UNTITLED,
+    savedHash,
+    midi,
+    countIn = false,
+    grid = "bar",
+    melodyGrid = 0.5,
+    melodyVisible = true,
+    melodyCompact = false,
+    timelineFit = false,
+    mixer = structuredClone(DEFAULT_MIXER),
+    showDegrees = true,
+    soundOnHover = false,
+    instrumentView = "keyboard",
+    theme = "auto",
+    topBar = "pinned",
+    dock = "full",
+    dockPanels = { ...DEFAULT_DOCK_PANELS },
+    ...rest
+  } = base;
   return {
     ...rest,
     theme,
     countIn,
     grid,
+    melodyGrid,
+    melodyVisible,
+    melodyCompact,
+    timelineFit,
+    mixer,
     showDegrees,
     soundOnHover,
     instrumentView,
     topBar,
     dock,
+    dockPanels,
     regionEnd: null,
     editEnding: false,
     // Saída MIDI começa desligada a cada sessão. A entrada (teclado) continua ligada se estava: a permissão já foi
@@ -221,6 +357,7 @@ function initialState(): State {
     savedSongs: repository.listSongs(),
     selectedItem: 0,
     selectedChord: null,
+    selectedMelodyNote: null,
     past: [],
     future: [],
     playing: false,
@@ -249,12 +386,20 @@ export function selectBlockCtx(s: Pick<State, "tonic" | "scaleId" | "song" | "se
 }
 
 const NO_CHORDS: Chord[] = [];
+const NO_MELODY: MelodyNote[] = [];
 
 /** Acordes que a progressão está editando: os do bloco ou os da casa 2 (referência estável, segura em `useStore`). */
 export function selectEditChords(s: Pick<State, "song" | "selectedItem" | "editEnding">): Chord[] {
   const block = selectBlock(s);
   if (!block) return NO_CHORDS;
   return s.editEnding ? (block.ending ?? NO_CHORDS) : block.chords;
+}
+
+/** Notas da melodia em edição: as do bloco ou as da casa 2 (referência estável, segura em `useStore`). */
+export function selectEditMelody(s: Pick<State, "song" | "selectedItem" | "editEnding">): MelodyNote[] {
+  const block = selectBlock(s);
+  if (!block) return NO_MELODY;
+  return s.editEnding ? (block.melodyEnding ?? NO_MELODY) : (block.melody ?? NO_MELODY);
 }
 
 export const selectBlock = (s: Pick<State, "song" | "selectedItem">): Block | null => {
@@ -285,17 +430,37 @@ function tonicChordFor(s: Pick<State, "tonic" | "scaleId" | "song">, block: Bloc
 
 function cloneBlock(b: Block, name: string): Block {
   const fresh = (list: Chord[]) => list.map((c) => ({ ...structuredClone(c), id: newChordId() }));
-  return { ...structuredClone(b), id: newId("b"), name, chords: fresh(b.chords), ...(b.ending ? { ending: fresh(b.ending) } : {}) };
+  const freshMelody = (list: MelodyNote[]) => list.map((m) => ({ ...structuredClone(m), id: newMelodyNoteId() }));
+  return {
+    ...structuredClone(b),
+    id: newId("b"),
+    name,
+    chords: fresh(b.chords),
+    ...(b.ending ? { ending: fresh(b.ending) } : {}),
+    ...(b.melody ? { melody: freshMelody(b.melody) } : {}),
+    ...(b.melodyEnding ? { melodyEnding: freshMelody(b.melodyEnding) } : {}),
+  };
 }
 
-/** Ajusta a seleção ao restaurar uma música: bloco existente e acorde ainda presente; sai da casa 2 se o bloco mudou. */
-function fixSelection(s: State, song: Song): Pick<State, "selectedItem" | "selectedChord" | "regionEnd" | "editEnding"> {
+/** Ajusta a seleção ao restaurar uma música: bloco existente e acorde/nota ainda presentes; sai da casa 2 se o bloco mudou. */
+function fixSelection(
+  s: State,
+  song: Song,
+): Pick<State, "selectedItem" | "selectedChord" | "selectedMelodyNote" | "regionEnd" | "editEnding"> {
   const selectedItem = Math.max(0, Math.min(s.selectedItem, song.arrangement.length - 1));
   const block = selectBlock({ song, selectedItem });
   const editEnding = s.editEnding && block?.id === selectBlock(s)?.id;
   const list = editEnding ? (block?.ending ?? []) : (block?.chords ?? []);
   const keep = s.selectedChord !== null && list.some((c) => c.id === s.selectedChord);
-  return { selectedItem, selectedChord: keep ? s.selectedChord : null, regionEnd: null, editEnding };
+  const melList = editEnding ? (block?.melodyEnding ?? []) : (block?.melody ?? []);
+  const keepMel = s.selectedMelodyNote !== null && melList.some((m) => m.id === s.selectedMelodyNote);
+  return {
+    selectedItem,
+    selectedChord: keep ? s.selectedChord : null,
+    selectedMelodyNote: keepMel ? s.selectedMelodyNote : null,
+    regionEnd: null,
+    editEnding,
+  };
 }
 
 export const useStore = create<Store>()((set, get) => {
@@ -343,10 +508,22 @@ export const useStore = create<Store>()((set, get) => {
     if (!b.ending && create) b.ending = [];
     return b.ending ?? null;
   };
+  const editMelodyList = (song: Song, s: State, create = false): MelodyNote[] | null => {
+    const b = currentBlock(song, s);
+    if (!b) return null;
+    if (s.editEnding) {
+      if (!b.melodyEnding && create) b.melodyEnding = [];
+      return b.melodyEnding ?? null;
+    }
+    if (!b.melody && create) b.melody = [];
+    return b.melody ?? null;
+  };
   /** Casa 2 vazia não é guardada. */
   const tidyEnding = (song: Song, s: State) => {
     const b = currentBlock(song, s);
     if (b?.ending && !b.ending.length) delete b.ending;
+    if (b?.melodyEnding && !b.melodyEnding.length) delete b.melodyEnding;
+    if (b?.melody && !b.melody.length) delete b.melody;
   };
 
   const editChord = (id: string, fn: (c: Chord) => void) =>
@@ -369,15 +546,19 @@ export const useStore = create<Store>()((set, get) => {
       const s = get();
       if (s.tonic === pc) return;
       if (s.tonic !== null) {
-        // Transpor: a progressão inteira acompanha, mantendo os graus.
+        // Transpor: a progressão e a melodia inteiras acompanham, mantendo os graus.
         const delta = pc - s.tonic;
+        const melDelta = shortestTransposeDelta(s.tonic, pc);
         commit(
           (song) => {
             for (const b of Object.values(song.blocks)) {
               for (const c of [...b.chords, ...(b.ending ?? [])]) {
+                if (isRest(c)) continue;
                 c.root = mod12(c.root + delta);
                 if (c.bass !== undefined) c.bass = mod12(c.bass + delta);
               }
+              if (b.melody?.length) b.melody = transposeMelody(b.melody, melDelta);
+              if (b.melodyEnding?.length) b.melodyEnding = transposeMelody(b.melodyEnding, melDelta);
               // Modulações acompanham: a relação entre as tonalidades se mantém.
               if (b.key) b.key = { ...b.key, tonic: mod12(b.key.tonic + delta) };
             }
@@ -386,9 +567,9 @@ export const useStore = create<Store>()((set, get) => {
         );
         return;
       }
-      // Primeira definição: um único commit (tônica + acorde da tônica, se for o caso).
+      // Primeira definição: um único commit (tônica + acorde da tônica, se `startWithSelected` estiver marcado).
       const block = selectBlock(s);
-      const chord = block && !block.key && !block.chords.length && !s.startWithSelected ? tonicChordFor({ ...s, tonic: pc }, block) : null;
+      const chord = block && !block.key && !block.chords.length && s.startWithSelected ? tonicChordFor({ ...s, tonic: pc }, block) : null;
       commit(
         (song, st) => {
           if (chord) currentBlock(song, st)!.chords.push(chord);
@@ -410,6 +591,24 @@ export const useStore = create<Store>()((set, get) => {
     setFollowScale: (followScale) => set({ followScale }),
     setCountIn: (countIn) => set({ countIn }),
     setGrid: (grid) => set({ grid }),
+    setMelodyGrid: (melodyGrid) => set({ melodyGrid }),
+    setMelodyVisible: (melodyVisible) => set({ melodyVisible }),
+    setMelodyCompact: (melodyCompact) => set({ melodyCompact }),
+    setTimelineFit: (timelineFit) => set({ timelineFit }),
+    setDockPanel: (panel, expanded) => set((s) => ({ dockPanels: { ...s.dockPanels, [panel]: expanded } })),
+    toggleDockPanel: (panel) => set((s) => ({ dockPanels: { ...s.dockPanels, [panel]: !s.dockPanels[panel] } })),
+    selectMelodyNote: (selectedMelodyNote) =>
+      set(selectedMelodyNote ? { selectedMelodyNote, selectedChord: null, regionEnd: null } : { selectedMelodyNote }),
+    setTrackMix: (track, patch) => {
+      const cur = get().mixer;
+      const prev = cur[track];
+      const nextTrack: TrackMix = {
+        volume: patch.volume !== undefined && Number.isFinite(patch.volume) ? Math.max(0, Math.min(1.5, patch.volume)) : prev.volume,
+        muted: patch.muted !== undefined ? patch.muted : prev.muted,
+        solo: patch.solo !== undefined ? patch.solo : prev.solo,
+      };
+      set({ mixer: { ...cur, [track]: nextTrack } });
+    },
     setShowDegrees: (showDegrees) => set({ showDegrees }),
     setSoundOnHover: (soundOnHover) => set({ soundOnHover }),
     setInstrumentView: (instrumentView) => set({ instrumentView }),
@@ -426,16 +625,24 @@ export const useStore = create<Store>()((set, get) => {
       // Muda o bloco exibido; mantém a seleção só se o acorde existir no novo bloco.
       const item = s.song.arrangement[playhead.itemIndex];
       const keep = item && s.song.blocks[item.blockId]?.chords.some((c) => c.id === s.selectedChord);
-      set({ playhead, selectedItem: playhead.itemIndex, selectedChord: keep ? s.selectedChord : null, regionEnd: null, editEnding: false });
+      set({
+        playhead,
+        selectedItem: playhead.itemIndex,
+        selectedChord: keep ? s.selectedChord : null,
+        selectedMelodyNote: null,
+        regionEnd: null,
+        editEnding: false,
+      });
     },
     setFollowPlayback: (followPlayback) => set({ followPlayback }),
     setMidi: (patch) => set({ midi: { ...get().midi, ...patch } }),
 
-    addChord: (root, quality, modifiers, bass) => {
+    addChord: (root, quality, modifiers, bass, duration) => {
       const s = get();
       const block = selectBlock(s);
       if (!block) return null;
-      const chord = makeChord(root, quality, (block.meter ?? s.song.meter)[0]);
+      const dur = Math.max(0.25, duration ?? gridBeats(s.grid, block.meter ?? s.song.meter));
+      const chord = makeChord(root, quality, dur);
       if (modifiers?.length) chord.modifiers = structuredClone(modifiers);
       if (bass !== undefined && bass !== root) chord.bass = bass;
       commit(
@@ -449,15 +656,81 @@ export const useStore = create<Store>()((set, get) => {
       return chord;
     },
 
-    selectChord: (selectedChord) => set({ selectedChord, regionEnd: null }),
-    setEditEnding: (editEnding) => set({ editEnding, selectedChord: null, regionEnd: null }),
+    addRest: (duration) => {
+      const s = get();
+      const block = selectBlock(s);
+      if (!block) return null;
+      const dur = Math.max(0.25, duration ?? gridBeats(s.grid, block.meter ?? s.song.meter));
+      const rest = makeRest(dur);
+      commit(
+        (song, st) => {
+          const list = editList(song, st, true)!;
+          const at = list.findIndex((c) => c.id === st.selectedChord);
+          list.splice(at >= 0 ? at + 1 : list.length, 0, rest);
+        },
+        { selectedChord: rest.id },
+      );
+      return rest;
+    },
+
+    insertChordAtBeat: (beat, chordOrRest) => {
+      const s = get();
+      const block = selectBlock(s);
+      if (!block) return null;
+      const defDur = gridBeats(s.grid, block.meter ?? s.song.meter);
+      const item: Chord =
+        "id" in chordOrRest
+          ? structuredClone(chordOrRest)
+          : "rest" in chordOrRest && chordOrRest.rest
+            ? makeRest(Math.max(0.25, chordOrRest.duration ?? defDur))
+            : (() => {
+                const c = makeChord(chordOrRest.root, chordOrRest.quality, Math.max(0.25, chordOrRest.duration ?? defDur));
+                if (chordOrRest.modifiers?.length) c.modifiers = structuredClone(chordOrRest.modifiers);
+                if (chordOrRest.bass !== undefined && chordOrRest.bass !== chordOrRest.root) c.bass = chordOrRest.bass;
+                return c;
+              })();
+      commit(
+        (song, st) => {
+          const list = editList(song, st, true)!;
+          const end = list.reduce((sum, c) => sum + c.duration, 0);
+          if (beat > end + 1e-6) {
+            list.push(makeRest(Math.max(0.25, beat - end)));
+          }
+          list.push(item);
+        },
+        { selectedChord: item.id },
+      );
+      return item;
+    },
+
+    toggleRest: (id) =>
+      editChord(id, (c) => {
+        if (isRest(c)) {
+          delete c.rest;
+        } else {
+          c.root = 0;
+          c.quality = "maj";
+          c.modifiers = [];
+          delete c.bass;
+          delete c.voicing;
+          delete c.octave;
+          c.rest = true;
+        }
+      }),
+
+    selectChord: (selectedChord) =>
+      set(selectedChord ? { selectedChord, selectedMelodyNote: null, regionEnd: null } : { selectedChord, regionEnd: null }),
+    setEditEnding: (editEnding) => set({ editEnding, selectedChord: null, selectedMelodyNote: null, regionEnd: null }),
     clearEnding: () =>
       commit(
         (song, s) => {
           const b = currentBlock(song, s);
-          if (b) delete b.ending;
+          if (b) {
+            delete b.ending;
+            delete b.melodyEnding;
+          }
         },
-        { selectedChord: null, editEnding: false },
+        { selectedChord: null, selectedMelodyNote: null, editEnding: false },
       ),
 
     removeChord: (id) =>
@@ -491,24 +764,32 @@ export const useStore = create<Store>()((set, get) => {
         list.splice(to, 0, c);
       }),
 
-    setDuration: (id, beats) => editChord(id, (c) => void (c.duration = Math.max(0.5, beats))),
-    toggleMod: (id, m) => editChord(id, (c) => void (c.modifiers = toggleModifier(c.modifiers, m))),
+    setDuration: (id, beats) => editChord(id, (c) => void (c.duration = Math.max(0.25, beats))),
+    toggleMod: (id, m) => editChord(id, (c) => void (!isRest(c) && (c.modifiers = toggleModifier(c.modifiers, m)))),
     setBass: (id, bass) =>
       editChord(id, (c) => {
+        if (isRest(c)) return;
         if (bass === undefined || mod12(bass) === c.root) delete c.bass;
         else c.bass = mod12(bass);
       }),
-    setOctave: (id, octave) => editChord(id, (c) => void (c.octave = Math.max(-2, Math.min(2, octave)))),
+    setOctave: (id, octave) => editChord(id, (c) => void (!isRest(c) && (c.octave = Math.max(-2, Math.min(2, octave))))),
 
     clearBlock: () => {
       const s = get();
       const block = selectBlock(s);
       if (!block) return;
       if (s.editEnding) {
-        commit((song, st) => void delete currentBlock(song, st)!.ending, { selectedChord: null });
+        commit(
+          (song, st) => {
+            const b = currentBlock(song, st)!;
+            delete b.ending;
+            delete b.melodyEnding;
+          },
+          { selectedChord: null, selectedMelodyNote: null },
+        );
         return;
       }
-      const chord = s.startWithSelected ? null : tonicChordFor(s, block);
+      const chord = s.startWithSelected ? tonicChordFor(s, block) : null;
       commit((song, st) => void (currentBlock(song, st)!.chords = chord ? [chord] : []), { selectedChord: chord?.id ?? null });
     },
 
@@ -532,6 +813,7 @@ export const useStore = create<Store>()((set, get) => {
         const list = editList(song, s);
         if (!b || !list) return;
         for (const c of list) {
+          if (isRest(c)) continue;
           const has = (iv: number) => (ctx ? ctx.pcSet.has(mod12(c.root + iv)) : true);
           const exts = c.modifiers.filter((m) => m.kind === "ext");
           const hasSeventh = exts.some((m) => m.value === 7 || m.value === "maj7");
@@ -559,12 +841,173 @@ export const useStore = create<Store>()((set, get) => {
         }
       }),
 
-    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null, regionEnd: null, editEnding: false }),
+    upsertMelodyNote: (note) => {
+      const s = get();
+      if (!selectBlock(s)) return null;
+      const full = makeMelodyNote(note.pitch, note.start, note.duration, note.velocity);
+      if (note.id) full.id = note.id;
+      commit(
+        (song, st) => {
+          const b = currentBlock(song, st);
+          if (!b) return;
+          const list = editMelodyList(song, st, true) ?? [];
+          const next = upsertMelodyList(list, full);
+          if (st.editEnding) b.melodyEnding = next;
+          else b.melody = next;
+        },
+        { selectedMelodyNote: full.id },
+      );
+      return full;
+    },
+
+    updateMelodyNote: (id, patch) =>
+      commit((song, st) => {
+        const b = currentBlock(song, st);
+        const list = editMelodyList(song, st);
+        const cur = list?.find((n) => n.id === id);
+        if (!b || !list || !cur) return;
+        const nextNote = makeMelodyNote(
+          patch.pitch ?? cur.pitch,
+          patch.start ?? cur.start,
+          patch.duration ?? cur.duration,
+          "velocity" in patch ? patch.velocity : cur.velocity,
+        );
+        nextNote.id = cur.id;
+        const next = upsertMelodyList(list, nextNote);
+        if (st.editEnding) b.melodyEnding = next;
+        else b.melody = next;
+      }),
+
+    removeMelodyNote: (id) =>
+      commit(
+        (song, st) => {
+          const b = currentBlock(song, st);
+          const list = editMelodyList(song, st);
+          if (!b || !list) return;
+          const next = list.filter((n) => n.id !== id);
+          if (st.editEnding) {
+            if (next.length) b.melodyEnding = next;
+            else delete b.melodyEnding;
+          } else {
+            if (next.length) b.melody = next;
+            else delete b.melody;
+          }
+        },
+        get().selectedMelodyNote === id ? { selectedMelodyNote: null } : {},
+      ),
+
+    clearMelody: () =>
+      commit(
+        (song, st) => {
+          const b = currentBlock(song, st);
+          if (!b) return;
+          if (st.editEnding) delete b.melodyEnding;
+          else delete b.melody;
+        },
+        { selectedMelodyNote: null },
+      ),
+
+    snapBlockMelodyToScale: () => {
+      const s = get();
+      const ctx = selectBlockCtx(s);
+      const cur = selectEditMelody(s);
+      if (!ctx || !cur.length) return;
+      const snapped = snapMelodyToScale(cur, ctx);
+      if (snapped.every((n, i) => n.pitch === cur[i].pitch)) return;
+      commit((song, st) => {
+        const b = currentBlock(song, st);
+        if (!b) return;
+        if (st.editEnding) b.melodyEnding = snapped;
+        else b.melody = snapped;
+      });
+    },
+
+    setBlockChords: (chords) =>
+      commit(
+        (song, st) => {
+          const b = currentBlock(song, st);
+          if (!b) return;
+          const clean = structuredClone(chords);
+          if (st.editEnding) {
+            if (clean.length) b.ending = clean;
+            else delete b.ending;
+          } else {
+            b.chords = clean;
+          }
+        },
+        { selectedChord: chords[0]?.id ?? null },
+      ),
+
+    applyAIGeneration: (patch) => {
+      const s = get();
+      const block = selectBlock(s);
+      if (!block) return;
+      const hasChange =
+        patch.chords !== undefined ||
+        patch.melody !== undefined ||
+        patch.bassInstrument !== undefined ||
+        patch.tonic !== undefined ||
+        patch.scaleId !== undefined;
+      if (!hasChange) return;
+
+      const extra: Partial<State> = {};
+      if (patch.chords !== undefined) {
+        extra.selectedChord = patch.chords[0]?.id ?? null;
+        extra.selectedMelodyNote = null;
+      } else if (patch.melody !== undefined) {
+        extra.selectedMelodyNote = patch.melody[0]?.id ?? null;
+        extra.selectedChord = null;
+      }
+      if (!block.key) {
+        if (patch.tonic !== undefined && Number.isFinite(patch.tonic)) {
+          extra.tonic = mod12(patch.tonic);
+        }
+        if (patch.scaleId !== undefined && hasScale(patch.scaleId)) {
+          extra.scaleId = patch.scaleId;
+        }
+      }
+
+      commit((song, st) => {
+        const b = currentBlock(song, st);
+        if (!b) return;
+        if (patch.chords !== undefined) {
+          const cleanChords = structuredClone(patch.chords);
+          if (st.editEnding) {
+            if (cleanChords.length) b.ending = cleanChords;
+            else delete b.ending;
+          } else {
+            b.chords = cleanChords;
+          }
+        }
+        if (patch.melody !== undefined) {
+          const cleanMelody = structuredClone(patch.melody);
+          if (st.editEnding) {
+            if (cleanMelody.length) b.melodyEnding = cleanMelody;
+            else delete b.melodyEnding;
+          } else if (cleanMelody.length) {
+            b.melody = cleanMelody;
+          } else {
+            delete b.melody;
+          }
+        }
+        if (patch.bassInstrument !== undefined && hasInstrument(patch.bassInstrument)) {
+          b.bassInstrument = patch.bassInstrument;
+        }
+        if (b.key && (patch.tonic !== undefined || patch.scaleId !== undefined)) {
+          b.key = {
+            tonic: patch.tonic !== undefined && Number.isFinite(patch.tonic) ? mod12(patch.tonic) : b.key.tonic,
+            scaleId: patch.scaleId !== undefined && hasScale(patch.scaleId) ? patch.scaleId : b.key.scaleId,
+          };
+        }
+      }, extra);
+    },
+
+    selectItem: (selectedItem) => set({ selectedItem, selectedChord: null, selectedMelodyNote: null, regionEnd: null, editEnding: false }),
 
     addBlock: () => {
       const s = get();
       const block = makeBlock(`Bloco ${Object.keys(s.song.blocks).length + 1}`, Object.keys(s.song.blocks).length);
-      const chord = s.startWithSelected ? null : tonicChordFor(s, block);
+      const chord = s.startWithSelected ? tonicChordFor(s, block) : null;
       if (chord) block.chords.push(chord);
       commit(
         (song) => {
@@ -625,12 +1068,12 @@ export const useStore = create<Store>()((set, get) => {
         if (!b) return;
         for (const [k, v] of Object.entries(patch) as [keyof typeof patch, unknown][]) {
           let value = v;
-          if (k === "bpm" || k === "midiChannel" || k === "rampTo") {
-            const [lo, hi] = k === "midiChannel" ? [1, 16] : [30, 300];
+          if (k === "bpm" || k === "midiChannel" || k === "melodyMidiChannel" || k === "rampTo") {
+            const [lo, hi] = k === "midiChannel" || k === "melodyMidiChannel" ? [1, 16] : [30, 300];
             value = typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : undefined;
           }
           if (k === "color") value = typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : b.color;
-          if (k === "bassInstrument") value = typeof v === "string" && hasInstrument(v) ? v : undefined;
+          if (k === "bassInstrument" || k === "melodyInstrument") value = typeof v === "string" && hasInstrument(v) ? v : undefined;
           if (k === "drone") value = v === true ? true : undefined;
           if (k === "key") {
             const key = v as Block["key"];
@@ -655,6 +1098,7 @@ export const useStore = create<Store>()((set, get) => {
 
     setVoicing: (id, voicing) =>
       editChord(id, (c) => {
+        if (isRest(c)) return;
         if (voicing === undefined || voicing === "closed") delete c.voicing;
         else c.voicing = voicing;
       }),
@@ -668,7 +1112,7 @@ export const useStore = create<Store>()((set, get) => {
           song.blocks = Object.fromEntries(blocks.map((b) => [b.id, b]));
           song.arrangement = arrangement;
         },
-        { selectedItem: 0, selectedChord: null, tonic },
+        { selectedItem: 0, selectedChord: null, selectedMelodyNote: null, tonic },
       );
     },
 
@@ -676,6 +1120,7 @@ export const useStore = create<Store>()((set, get) => {
     setMeter: (meter) => commit((song) => void (song.meter = meter)),
     setSwing: (swing) => commit((song) => void (song.swing = Math.max(0, Math.min(75, swing))), {}, { coalesce: "swing" }),
     setInstrument: (id) => commit((song) => void (song.instrument = id)),
+    setMelodyInstrument: (id) => commit((song) => void (hasInstrument(id) && (song.melodyInstrument = id))),
     setPattern: (p) => commit((song) => void (song.pattern = p)),
 
     saveSong: () => {
@@ -716,6 +1161,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: contentHash(fresh),
         selectedItem: 0,
         selectedChord: null,
+        selectedMelodyNote: null,
         regionEnd: null,
         editEnding: false,
         past: [],
@@ -736,6 +1182,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: contentHash(stored),
         selectedItem: 0,
         selectedChord: null,
+        selectedMelodyNote: null,
         regionEnd: null,
         editEnding: false,
         past: [],
@@ -757,6 +1204,7 @@ export const useStore = create<Store>()((set, get) => {
         savedHash: null,
         selectedItem: 0,
         selectedChord: null,
+        selectedMelodyNote: null,
         regionEnd: null,
         editEnding: false,
         past: [],
@@ -814,11 +1262,17 @@ function buildSession(s: State): Session {
     followScale: s.followScale,
     countIn: s.countIn,
     grid: s.grid,
+    melodyGrid: s.melodyGrid,
+    melodyVisible: s.melodyVisible,
+    melodyCompact: s.melodyCompact,
+    timelineFit: s.timelineFit,
+    mixer: s.mixer,
     showDegrees: s.showDegrees,
     soundOnHover: s.soundOnHover,
     instrumentView: s.instrumentView,
     topBar: s.topBar,
     dock: s.dock,
+    dockPanels: s.dockPanels,
     theme: s.theme,
     midi: s.midi,
     song: s.song,
@@ -859,8 +1313,13 @@ useStore.subscribe(() => {
   if (!sessionDiscarded) saveTimer = setTimeout(flushSession, 300);
 });
 
-/** O acorde cabe na escala atual? (sem tônica, tudo cabe) */
-export function chordInScale(s: Pick<State, "tonic" | "scaleId">, c: Pick<Chord, "root" | "quality">, block?: Pick<Block, "key"> | null): boolean {
+/** O acorde cabe na escala atual? (sem tônica ou pausa N.C., sempre cabe) */
+export function chordInScale(
+  s: Pick<State, "tonic" | "scaleId">,
+  c: Pick<Chord, "root" | "quality" | "rest">,
+  block?: Pick<Block, "key"> | null,
+): boolean {
+  if (isRest(c)) return true;
   const key = blockKey(s, block);
   const ctx = key ? scaleContext(key.tonic, key.scaleId) : null;
   return !ctx || chordFits(c.root, c.quality, ctx.pcSet);

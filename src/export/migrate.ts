@@ -1,7 +1,7 @@
 // Migração do formato salvo (sessão, arquivo .json, músicas guardadas). Módulo puro.
 // Cada passo leva os dados da versão `from` para `from + 1`; `migrate` encadeia até a versão atual.
 
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;
 
 export type MigrationStep = { from: number; migrate: (raw: Record<string, unknown>) => Record<string, unknown> };
 
@@ -9,7 +9,10 @@ export type MigrationStep = { from: number; migrate: (raw: Record<string, unknow
  * Passos em ordem crescente de `from`. Para evoluir o formato: suba `CURRENT_VERSION` para 2 e acrescente
  *   { from: 1, migrate: (raw) => ({ ...raw, campoNovo: raw.campoAntigo ?? 0 }) }
  */
-const STEPS: MigrationStep[] = [];
+const STEPS: MigrationStep[] = [
+  // v1 → v2: formato v1 é estruturalmente compatível; campos de melodia e pausas N.C. são opcionais e saneados no carregamento.
+  { from: 1, migrate: (raw) => ({ ...raw }) },
+];
 
 /** Leva `raw` da `version` dada até `CURRENT_VERSION`. null = versão inválida, mais nova que a atual, ou passo que falhou. */
 export function migrate(raw: unknown, version: number, steps: MigrationStep[] = STEPS, target = CURRENT_VERSION): { data: unknown; version: number } | null {

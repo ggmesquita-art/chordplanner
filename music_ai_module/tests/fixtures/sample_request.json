@@ -1,0 +1,67 @@
+{
+  "bpm": 120,
+  "time_signature": [4, 4],
+  "camelot_key": "8A",
+  "tonic_pc": 9,
+  "scale_id": "minor",
+  "style_prompt": "Modern Pop Ballad, emotional, piano driven",
+  "genre": "pop",
+  "form_structure": ["A"],
+  "section_lengths": [4],
+  "input_tracks": [
+    {
+      "role": "chords",
+      "program": 0,
+      "notes": [
+        {
+          "pitch": 57,
+          "start_tick": 0,
+          "end_tick": 960,
+          "velocity": 80
+        },
+        {
+          "pitch": 60,
+          "start_tick": 0,
+          "end_tick": 960,
+          "velocity": 80
+        },
+        {
+          "pitch": 64,
+          "start_tick": 0,
+          "end_tick": 960,
+          "velocity": 80
+        }
+      ],
+      "chord_symbols": ["Am"]
+    }
+  ],
+  "target_tracks": ["chords", "bass"],
+  "generate_melody": false,
+  "inpaint_range": null,
+  "density": {
+    "chords": 5,
+    "bass": 4,
+    "drums": 6,
+    "pad": 3,
+    "melody": 5
+  },
+  "polyphony": {
+    "chords": 4,
+    "bass": 1,
+    "drums": 3,
+    "pad": 4,
+    "melody": 1
+  },
+  "note_duration": {
+    "chords": 0.6,
+    "bass": 0.8,
+    "drums": 0.25,
+    "pad": 0.9,
+    "melody": 0.5
+  },
+  "use_velocity": true,
+  "use_microtiming": true,
+  "temperature": 1.0,
+  "seed": 42,
+  "model_name": "expressive_medium"
+}

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { instrumentProgress, instrumentStatus, play, type PlayOptions, previewNotes, stop, subscribeStatus } from "../audio/engine";
 import { configureMidi, midiSnapshot, subscribeMidi } from "../audio/midi";
-import type { Chord } from "../core/chords";
+import { setMixState } from "../audio/status";
+import { isRest, type Chord } from "../core/chords";
+import { DEFAULT_MELODY_INSTRUMENT } from "../core/melody";
 import { makeSpeller, type Speller } from "../core/pitch";
 import { blockMeter, expandArrangement, expandRegion } from "../core/song";
 import { meterLabel } from "../core/timeline";
@@ -46,24 +48,33 @@ export function currentInstrument(): string {
   return selectBlock(s)?.instrument ?? s.song.instrument;
 }
 
+/** Instrumento efetivo da pista de melodia no bloco selecionado. */
+export function currentMelodyInstrument(): string {
+  const s = useStore.getState();
+  return selectBlock(s)?.melodyInstrument ?? s.song.melodyInstrument ?? DEFAULT_MELODY_INSTRUMENT;
+}
+
 export function previewChord(chord: Chord, instrumentId = currentInstrument()) {
+  if (isRest(chord)) return;
   void previewNotes(voiceChord(chord), instrumentId);
 }
 
 export async function togglePlay() {
   const s = useStore.getState();
   if (s.playing) {
-    stop();
     s.setPlaying(false);
+    stop();
     return;
   }
   const region = s.playScope === "region" ? selectRegion(s) : null;
   const only = s.playScope === "block" || s.playScope === "region" ? [s.selectedItem] : undefined;
   const expanded = region ? expandRegion(s.song, s.selectedItem, region.from, region.to) : expandArrangement(s.song, only);
-  if (!expanded.events.length) return;
+  if ((!expanded.events.length && !expanded.melodyEvents.length) || expanded.totalSec <= 0) return;
   s.setPlaying(true);
   const opts: PlayOptions = {
     channelFor: (blockId) => useStore.getState().song.blocks[blockId]?.midiChannel ?? useStore.getState().midi.channel,
+    melodyChannelFor: (blockId) => useStore.getState().song.blocks[blockId]?.melodyMidiChannel ?? useStore.getState().midi.melodyChannel,
+    mixer: s.mixer,
     loop: s.loop,
     metronome: s.metronome,
     countIn: s.countIn,
@@ -76,7 +87,8 @@ export async function togglePlay() {
     voiceLeading: s.song.voiceLeading,
     onEvent: (i) => {
       const ev = expanded.events[i];
-      useStore.getState().setPlayhead({ itemIndex: ev.itemIndex, chordIndex: ev.chordIndex, eventIndex: i });
+      if (!ev) return;
+      useStore.getState().setPlayhead({ itemIndex: ev.itemIndex, chordIndex: ev.isPadding ? -1 : ev.chordIndex, eventIndex: i });
     },
     onEnd: () => useStore.getState().setPlaying(false),
   };
@@ -84,16 +96,27 @@ export async function togglePlay() {
 }
 
 export function stopPlayback() {
-  stop();
   useStore.getState().setPlaying(false);
+  stop();
 }
 
-/** Mantém o módulo de MIDI em sincronia com as configurações do store. */
+/** Mantém o módulo de MIDI e o mixer ao vivo em sincronia com as configurações do store. */
 export function useMidiSync() {
   useEffect(() => {
     configureMidi(useStore.getState().midi);
+    setMixState(useStore.getState().mixer);
     return useStore.subscribe((s, prev) => {
       if (s.midi !== prev.midi) configureMidi(s.midi);
+      if (s.mixer !== prev.mixer) setMixState(s.mixer);
+    });
+  }, []);
+}
+
+export function useMixerSync() {
+  useEffect(() => {
+    setMixState(useStore.getState().mixer);
+    return useStore.subscribe((s, prev) => {
+      if (s.mixer !== prev.mixer) setMixState(s.mixer);
     });
   }, []);
 }
@@ -132,5 +155,7 @@ export function usePositionLabel(): string {
   if (!playhead) return "—";
   const item = song.arrangement[playhead.itemIndex];
   const block = item && song.blocks[item.blockId];
-  return block ? `${block.name} · acorde ${playhead.chordIndex + 1} · ${meterLabel(blockMeter(song, block))}` : "—";
+  if (!block) return "—";
+  const meter = meterLabel(blockMeter(song, block));
+  return playhead.chordIndex < 0 ? `${block.name} · melodia · ${meter}` : `${block.name} · acorde ${playhead.chordIndex + 1} · ${meter}`;
 }

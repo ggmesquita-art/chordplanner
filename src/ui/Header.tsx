@@ -1,16 +1,18 @@
+import { useRef, useState } from "react";
 import type { AccidentalPref } from "../core/pitch";
 import { keyLabel } from "../core/view";
 import { selectBlock, useStore } from "../state/store";
 import type { RestrictionMode, Theme } from "../state/repository";
 import { useSpeller } from "./hooks";
 import { AboutButton } from "./About";
+import { AIPanel } from "./AIPanel/AIPanel";
 import { ExportMenu } from "./ExportMenu/ExportMenu";
 import { FileMenu } from "./FileMenu/FileMenu";
 import { InstrumentPicker } from "./InstrumentPicker/InstrumentPicker";
 import { ScalePicker } from "./ScalePicker/ScalePicker";
 import { Segmented } from "./Segmented";
 
-export function Header() {
+export function Header({ onOpenAI }: { onOpenAI?: () => void } = {}) {
   const tonic = useStore((s) => s.tonic);
   const setTonic = useStore((s) => s.setTonic);
   const accidentals = useStore((s) => s.accidentals);
@@ -21,6 +23,8 @@ export function Header() {
   const setTheme = useStore((s) => s.setTheme);
   const spell = useSpeller();
   const block = useStore((s) => selectBlock(s));
+  const [localAiOpen, setLocalAiOpen] = useState(false);
+  const aiBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <header className="header">
@@ -76,7 +80,25 @@ export function Header() {
         ]}
       />
       <InstrumentPicker />
+      <button
+        ref={aiBtnRef}
+        type="button"
+        className="btn ai-btn"
+        aria-haspopup="dialog"
+        title="IA Musical (MIDI-GPT + Music-Composition)"
+        onClick={() => (onOpenAI ? onOpenAI() : setLocalAiOpen(true))}
+      >
+        ✨ IA Musical
+      </button>
       <AboutButton />
+      {!onOpenAI && localAiOpen && (
+        <AIPanel
+          onClose={() => {
+            setLocalAiOpen(false);
+            aiBtnRef.current?.focus();
+          }}
+        />
+      )}
     </header>
   );
 }

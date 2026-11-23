@@ -1,6 +1,6 @@
 // Voicing: transforma um acorde resolvido em notas MIDI (DESIGN §3.5, §5.2).
 
-import type { Chord } from "./chords";
+import { isRest, type Chord } from "./chords";
 import { chordIntervals } from "./modifiers";
 import { mod12 } from "./pitch";
 
@@ -137,6 +137,7 @@ function leadVoices(shape: number[], prevUpper: number[], bass: number, oct: num
  * `prev`: notas do acorde anterior (baixo primeiro), para a condução de vozes; null = sem condução.
  */
 export function voiceChord(chord: Chord, prev: number[] | null = null): number[] {
+  if (isRest(chord)) return [];
   const oct = (chord.octave ?? 0) * 12;
   const bass = BASS_BASE + mod12(chord.bass ?? chord.root) + oct;
   let upper = upperShape(chord).map((n) => n + oct);

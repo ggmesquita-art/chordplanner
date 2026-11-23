@@ -27,6 +27,20 @@ npm run app:dist      # gera release/ChordPlanner-<versão>-arm64.dmg
 - Testes manuais: `CHORDPLANNER_OFFLINE=1` simula o computador sem internet; `CHORDPLANNER_DEBUG=1` registra os pedidos de permissão. Ícone: `scripts/gen-mac-icon.py`.
 - Instalação das dependências: o binário do Electron vem do script de instalação do pacote. Se o npm bloquear scripts, rode `node node_modules/electron/install.js`.
 
+### App de desktop (Windows)
+
+Sem Node.js instalado no sistema: `scripts/env.ps1` baixa um Node portátil para `.tools\node` (ignorado pelo git) e o põe no PATH da sessão.
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoExit -File .\scripts\env.ps1   # ou: $env:Path="$PWD\.tools\node;$env:Path"
+npm ci
+node node_modules/electron/install.js   # se o npm bloquear o script de instalação do Electron
+npm run app:dist:win                    # gera release\ChordPlanner-Setup-<versão>.exe (NSIS, x64)
+```
+
+- O instalador não é assinado: o Windows SmartScreen avisa na primeira execução ("Mais informações" → "Executar assim mesmo").
+- Sem `npm run app:samples` antes, os samples não vão embutidos: cada instrumento é baixado no primeiro uso e fica no cache do usuário.
+
 - `src/core/` — teoria musical pura e testada (escalas, acordes, diatônicos, modificadores, voicings, análise funcional, tempo, arranjo, braço de violão, prática).
 - Teclado MIDI (entrada): painel 🎛 MIDI → "Receber de um teclado MIDI". O acorde segurado aparece ao lado de "Roda de acordes" e acende na roda (`src/core/recognize.ts`); "Ouvir" toca as notas com o instrumento atual (pedal incluso); "Inserir na progressão" grava o acorde ao soltar as teclas. Chrome, Edge, Firefox e o app de desktop (o Safari não tem Web MIDI). A porta usada como saída (IAC Driver) é ignorada como entrada para não realimentar.
 - `src/audio/` — motor de áudio. `engine.ts` é uma fachada leve; Tone.js e smplr (`player.ts`, `loaders.ts`) só são baixados no primeiro som. Samples via smplr: SplendidGrandPiano, E-Pianos, VCSL, Smolken e MusyngKite (FluidR3 como plano B).
@@ -35,4 +49,4 @@ npm run app:dist      # gera release/ChordPlanner-<versão>-arm64.dmg
 - `src/ui/` — componentes (roda, progressão, arranjo, modificadores, seletores).
 - `src/sw/` e `src/pwa.ts` — service worker gerado no build (`vite.config.ts`) para uso offline; ícones gerados por `scripts/gen-icons.py`.
 
-Roadmap e o que falta: [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md).
+Roadmap atual: [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md) · Expansões futuras (pós-v4): [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).

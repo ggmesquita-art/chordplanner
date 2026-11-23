@@ -19,6 +19,8 @@ const SCHEME = "app";
 const ORIGIN = `${SCHEME}://chordplanner`;
 /** Hosts de onde o smplr e o plano B (FluidR3) baixam samples. */
 const SAMPLE_HOSTS = new Set(["smpldsnds.github.io", "gleitz.github.io", "goldst.dev"]);
+/** Hosts locais do serviço de IA (music_ai_module) permitidos mesmo em modo offline. */
+const LOCAL_AI_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const MIME = { ".json": "application/json", ".js": "text/javascript", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".sfz": "text/plain" };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -90,6 +92,14 @@ function registerProtocols() {
     const file = path.normalize(path.join(distDir, rel));
     if (!file.startsWith(distDir + path.sep)) return new Response("não encontrado", { status: 404 });
     return net.fetch(pathToFileURL(file).toString());
+  });
+  // Serviço local de IA (http://127.0.0.1:8765 / localhost): sempre permitido, mesmo com CHORDPLANNER_OFFLINE.
+  protocol.handle("http", (req) => {
+    const url = new URL(req.url);
+    if (LOCAL_AI_HOSTS.has(url.hostname)) {
+      return net.fetch(req, { bypassCustomProtocolHandlers: true });
+    }
+    return offline ? Response.error() : net.fetch(req, { bypassCustomProtocolHandlers: true });
   });
   // Samples: disco primeiro; o resto do https segue normal.
   protocol.handle("https", (req) => {

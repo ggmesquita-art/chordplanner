@@ -1,23 +1,27 @@
 // Export de cifra por seção (DESIGN §6).
 
+import { isRest, makeRest } from "../core/chords";
+import { melodyEndBeat } from "../core/melody";
 import { chordSymbol } from "../core/modifiers";
 import type { Speller } from "../core/pitch";
 import { getScale } from "../core/scales";
-import { blockBpm, blockMeter, endingCut, type Block, type Song } from "../core/song";
+import { blockBpm, blockChordBeats, blockMeter, endingCut, type Block, type Song } from "../core/song";
 import { meterLabel } from "../core/timeline";
 
-/** Uma célula por compasso; acordes que dividem o compasso ficam juntos, repetição vira `%`. */
-function barsOf(chords: { symbol: string; beats: number }[], beatsPerBar: number): string[] {
+const EPS = 1e-6;
+
+/** Uma célula por compasso; acordes que dividem o compasso ficam juntos, repetição vira `%`, pausas saem sempre como `N.C.`. */
+function barsOf(chords: { symbol: string; beats: number; isRest?: boolean }[], beatsPerBar: number): string[] {
   const bars: string[][] = [];
   let pos = 0;
   for (const c of chords) {
     let remaining = c.beats;
     let first = true;
-    while (remaining > 0) {
-      const barIndex = Math.floor(pos / beatsPerBar);
-      const room = beatsPerBar - (pos % beatsPerBar);
+    while (remaining > EPS) {
+      const barIndex = Math.floor(pos / beatsPerBar + 1e-9);
+      const room = beatsPerBar * (barIndex + 1) - pos;
       const take = Math.min(room, remaining);
-      (bars[barIndex] ??= []).push(first ? c.symbol : "");
+      (bars[barIndex] ??= []).push(first || c.isRest ? c.symbol : "");
       first = false;
       pos += take;
       remaining -= take;
@@ -55,8 +59,23 @@ export function songToText(song: Song, spellFor: (block: Block) => Speller): str
     const tail = key ? `${tempo}  (${key})` : tempo;
     lines.push(tempo !== lastTempo || key ? `${header}  ${tail}` : header);
     lastTempo = tempo;
-    const cells = (chords: Block["chords"]) => barsOf(chords.map((c) => ({ symbol: chordSymbol(c, spell), beats: c.duration })), meter[0]);
-    const bars = cells(block.chords);
+    const cells = (chords: Block["chords"]) =>
+      barsOf(
+        chords.map((c) => ({
+          symbol: isRest(c) ? "N.C." : chordSymbol(c, spell),
+          beats: c.duration,
+          isRest: isRest(c),
+        })),
+        meter[0],
+      );
+    const chordsEnd = blockChordBeats(block);
+    const melEnd = melodyEndBeat(block.melody);
+    let chordsForBars = block.chords;
+    if (melEnd > chordsEnd + EPS) {
+      const targetBeats = Math.ceil((melEnd - EPS) / meter[0]) * meter[0];
+      if (targetBeats > chordsEnd + EPS) chordsForBars = [...block.chords, makeRest(targetBeats - chordsEnd)];
+    }
+    const bars = cells(chordsForBars);
     if (block.ending?.length && item.repeat > 1 && bars.length) {
       const k = endingCut(block, meter) / meter[0];
       const head = bars.slice(0, k);

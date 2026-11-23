@@ -1,5 +1,5 @@
 import { previewNotes } from "../../audio/engine";
-import { initMidi } from "../../audio/midi";
+import { initMidi, type MidiRecordTarget } from "../../audio/midi";
 import { useStore } from "../../state/store";
 import { currentInstrument, useMidiState } from "../hooks";
 import { usePopover } from "../usePopover";
@@ -60,10 +60,27 @@ export function MidiPanel() {
                       <input type="checkbox" checked={midi.inputThru} onChange={(e) => setMidi({ inputThru: e.target.checked })} />
                       Ouvir com o instrumento atual
                     </label>
-                    <label className="check" title="Segure o acorde e solte: ele entra depois do acorde selecionado, como um clique na roda">
+                    <label className="check" title="Segure o acorde e solte, ou grave melodia conforme o destino escolhido abaixo">
                       <input type="checkbox" checked={midi.inputRecord} onChange={(e) => setMidi({ inputRecord: e.target.checked })} />
                       Inserir na progressão ao soltar as teclas
                     </label>
+                    <label className="field">
+                      Destino
+                      <select
+                        aria-label="Destino da gravação MIDI"
+                        value={midi.inputRecordTarget}
+                        onChange={(e) => setMidi({ inputRecordTarget: e.target.value as MidiRecordTarget })}
+                      >
+                        <option value="chords">Acordes (ao soltar)</option>
+                        <option value="melody-step">Melodia (passo a passo)</option>
+                        <option value="melody-live">Melodia (tempo real)</option>
+                      </select>
+                    </label>
+                    {midi.inputRecordTarget === "melody-live" && (
+                      <p className="muted small">
+                        No modo ao vivo, use <b>Contagem</b> + <b>Metrônomo</b> e dê ▶ Play: cada nota entra quantizada pela grade da melodia.
+                      </p>
+                    )}
                     <p className="muted small">O acorde tocado aparece ao lado de “Roda de acordes” e acende na roda. No navegador, clique uma vez na página para liberar o som.</p>
                   </>
                 )}
@@ -111,6 +128,20 @@ export function MidiPanel() {
                       ))}
                     </select>
                     <span className="muted small">(blocos podem usar outro)</span>
+                  </label>
+                  <label className="field">
+                    Saída da melodia (canal)
+                    <select
+                      aria-label="Saída da melodia (canal MIDI)"
+                      value={midi.melodyChannel}
+                      onChange={(e) => setMidi({ melodyChannel: Number(e.target.value) })}
+                    >
+                      {Array.from({ length: 16 }, (_, i) => (
+                        <option key={i + 1} value={i + 1}>
+                          {i + 1}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="field" title="Compensa a diferença entre o som do navegador e o do DAW">
                     Latência

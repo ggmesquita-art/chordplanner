@@ -2,7 +2,16 @@
 // (arquivo, link, localStorage). Módulo puro: sem React nem DOM.
 
 import { hasInstrument } from "../audio/instruments";
-import { newChordId, QUALITIES, type Chord, type QualityId, type VoicingId } from "../core/chords";
+import { makeRest, newChordId, QUALITIES, type Chord, type QualityId, type VoicingId } from "../core/chords";
+import {
+  MELODY_MAX_DURATION,
+  MELODY_MAX_MIDI,
+  MELODY_MIN_DURATION,
+  MELODY_MIN_MIDI,
+  newMelodyNoteId,
+  normalizeMonophonic,
+  type MelodyNote,
+} from "../core/melody";
 import type { Modifier } from "../core/modifiers";
 import { SCALES } from "../core/scales";
 import { BLOCK_COLORS, newId, type ArrangementItem, type Block, type PlaybackPattern, type Song } from "../core/song";
@@ -25,6 +34,8 @@ const MAX_NAME = 80;
 const MAX_ID = 64;
 const MAX_ITEMS = 256;
 const MAX_CHORDS = 256;
+const MAX_MELODY_NOTES = 1024;
+const MAX_MELODY_START = 4096;
 const MAX_MODIFIERS = 12;
 const MIN_DURATION = 0.25;
 const MAX_DURATION = 64;
@@ -63,6 +74,14 @@ function modifierOf(v: unknown): Modifier | null {
 
 function chordOf(v: unknown, used: Set<string>): Chord | null {
   if (!isObj(v)) return null;
+  const duration =
+    typeof v.duration === "number" && Number.isFinite(v.duration) && v.duration > 0 ? Math.max(MIN_DURATION, Math.min(MAX_DURATION, v.duration)) : 4;
+  if (v.rest === true) {
+    let id = isId(v.id) && !used.has(v.id) ? v.id : newChordId();
+    while (used.has(id)) id = newChordId();
+    used.add(id);
+    return { ...makeRest(duration), id };
+  }
   if (!isInt(v.root, 0, 11) || typeof v.quality !== "string" || !QUALITY_IDS.has(v.quality)) return null;
   let id = isId(v.id) && !used.has(v.id) ? v.id : newChordId();
   while (used.has(id)) id = newChordId();
@@ -77,14 +96,41 @@ function chordOf(v: unknown, used: Set<string>): Chord | null {
           .map(modifierOf)
           .filter((m): m is Modifier => m !== null)
       : [],
-    duration:
-      typeof v.duration === "number" && Number.isFinite(v.duration) && v.duration > 0 ? Math.max(MIN_DURATION, Math.min(MAX_DURATION, v.duration)) : 4,
+    duration,
   };
   if (isInt(v.bass, 0, 11)) chord.bass = v.bass;
   if (typeof v.octave === "number" && Number.isFinite(v.octave)) chord.octave = Math.max(-2, Math.min(2, Math.round(v.octave)));
   const voicing = VOICINGS.find((x) => x === v.voicing);
   if (voicing) chord.voicing = voicing;
   return chord;
+}
+
+function melodyNoteOf(v: unknown, used: Set<string>): MelodyNote | null {
+  if (!isObj(v)) return null;
+  if (!isInt(v.pitch, MELODY_MIN_MIDI, MELODY_MAX_MIDI)) return null;
+  if (typeof v.start !== "number" || !Number.isFinite(v.start) || v.start < 0 || v.start > MAX_MELODY_START) return null;
+  if (typeof v.duration !== "number" || !Number.isFinite(v.duration) || v.duration <= 0) return null;
+  let id = isId(v.id) && !used.has(v.id) ? v.id : newMelodyNoteId();
+  while (used.has(id)) id = newMelodyNoteId();
+  used.add(id);
+  const note: MelodyNote = {
+    id,
+    pitch: v.pitch,
+    start: v.start,
+    duration: Math.max(MELODY_MIN_DURATION, Math.min(MELODY_MAX_DURATION, v.duration)),
+  };
+  if (typeof v.velocity === "number" && Number.isFinite(v.velocity)) {
+    note.velocity = Math.max(0.05, Math.min(1, v.velocity));
+  }
+  return note;
+}
+
+function melodyOf(arr: unknown[], used: Set<string>): MelodyNote[] {
+  const parsed = arr
+    .slice(0, MAX_MELODY_NOTES)
+    .map((n) => melodyNoteOf(n, used))
+    .filter((n): n is MelodyNote => n !== null);
+  return parsed.length ? normalizeMonophonic(parsed) : [];
 }
 
 function blockOf(key: string, v: unknown, colorIndex: number, used: Set<string>): Block | null {
@@ -99,6 +145,19 @@ function blockOf(key: string, v: unknown, colorIndex: number, used: Set<string>)
       .map((c) => chordOf(c, used))
       .filter((c): c is Chord => c !== null),
   };
+  if (Array.isArray(v.melody)) {
+    const melody = melodyOf(v.melody, used);
+    if (melody.length) block.melody = melody;
+  }
+  if (Array.isArray(v.melodyEnding)) {
+    const melodyEnding = melodyOf(v.melodyEnding, used);
+    if (melodyEnding.length) block.melodyEnding = melodyEnding;
+  }
+  const melodyInstrument = instrumentOf(v.melodyInstrument);
+  if (melodyInstrument) block.melodyInstrument = melodyInstrument;
+  if (typeof v.melodyMidiChannel === "number" && Number.isFinite(v.melodyMidiChannel)) {
+    block.melodyMidiChannel = Math.max(1, Math.min(16, Math.round(v.melodyMidiChannel)));
+  }
   const bpm = bpmOf(v.bpm);
   if (bpm !== undefined) block.bpm = bpm;
   const meter = meterOf(v.meter);
@@ -166,6 +225,7 @@ export function sanitizeContent(input: unknown): SongContent | null {
       meter: meterOf(s.meter) ?? [4, 4],
       swing: typeof s.swing === "number" && Number.isFinite(s.swing) ? Math.max(0, Math.min(75, s.swing)) : 0,
       instrument: instrumentOf(s.instrument) ?? "piano",
+      ...(instrumentOf(s.melodyInstrument) ? { melodyInstrument: instrumentOf(s.melodyInstrument) } : {}),
       pattern: patternOf(s.pattern) ?? "block",
       ...(s.voiceLeading === true ? { voiceLeading: true } : {}),
       ...(s.reattack === true ? { reattack: true } : {}),

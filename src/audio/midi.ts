@@ -2,11 +2,15 @@
 // recebendo pelo IAC Driver do macOS. Funciona no Chrome/Edge/Firefox (não no Safari).
 // A entrada (teclado MIDI) usa o mesmo acesso: ver midiInput.ts.
 
+export type MidiRecordTarget = "chords" | "melody-step" | "melody-live";
+
 export type MidiSettings = {
   enabled: boolean;
   outputId: string | null;
   /** Canal global 1–16 (blocos podem sobrescrever). */
   channel: number;
+  /** Canal global 1–16 para a pista de melodia. */
+  melodyChannel: number;
   /** Compensação de latência em ms (positivo = atrasa o MIDI em relação ao áudio do navegador). */
   latencyMs: number;
   /** Silencia o som do navegador enquanto a saída MIDI está ativa. */
@@ -17,20 +21,24 @@ export type MidiSettings = {
   inputId: string | null;
   /** Toca as notas recebidas com o instrumento atual. */
   inputThru: boolean;
-  /** Ao soltar as teclas, insere o acorde reconhecido na progressão. */
+  /** Ao tocar, insere na progressão (acordes) ou na pista de melodia conforme `inputRecordTarget`. */
   inputRecord: boolean;
+  /** Alvo de gravação do teclado MIDI: acordes ao soltar, melodia passo a passo ou melodia ao vivo. */
+  inputRecordTarget: MidiRecordTarget;
 };
 
 export const DEFAULT_MIDI: MidiSettings = {
   enabled: false,
   outputId: null,
   channel: 1,
+  melodyChannel: 2,
   latencyMs: 0,
   muteBrowser: true,
   inputEnabled: false,
   inputId: null,
   inputThru: true,
   inputRecord: false,
+  inputRecordTarget: "chords",
 };
 
 export type MidiPort = { id: string; name: string };
@@ -117,6 +125,7 @@ export const activeOutputName = (): string | null => {
 };
 export const midiMutesBrowser = () => midiActive() && settings.muteBrowser;
 export const midiChannel = () => settings.channel;
+export const midiMelodyChannel = () => settings.melodyChannel;
 
 /** Converte um tempo do AudioContext em timestamp do `performance.now()` (base do Web MIDI). */
 export function toMidiTime(audioTime: number, ctx: AudioContext): number {

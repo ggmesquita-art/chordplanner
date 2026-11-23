@@ -56,6 +56,7 @@ describe("FileMenu", () => {
   it("importa um arquivo válido como música nova", async () => {
     const st = useStore.getState();
     st.setTonic(7);
+    st.addChord(7, "maj");
     st.addChord(0, "maj");
     st.renameSong("Importada");
     const text = serializeSongFile(currentSongFile());

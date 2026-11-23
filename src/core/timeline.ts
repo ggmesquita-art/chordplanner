@@ -33,7 +33,8 @@ export const barsOf = (beats: number, [beatsPerBar]: Meter) => beats / beatsPerB
 /** Quantos tempos faltam para fechar o último compasso (0 = completo). */
 export function missingBeats(beats: number, [beatsPerBar]: Meter): number {
   const rest = beats % beatsPerBar;
-  return rest === 0 ? 0 : beatsPerBar - rest;
+  if (rest < EPS || beatsPerBar - rest < EPS) return 0;
+  return beatsPerBar - rest;
 }
 
 /** Atraso de swing (em fração de tempo) para uma subdivisão de colcheia. */
@@ -41,9 +42,9 @@ export function swingOffset(swing: number, eighthIndex: number): number {
   return eighthIndex % 2 === 1 ? (swing / 100) * (1 / 6) : 0;
 }
 
-/** Grade de edição (DESIGN §3.8): unidade em que as durações são ajustadas. */
-export type Grid = 0.5 | 1 | 2 | 4 | "bar";
-export const GRIDS: Grid[] = [0.5, 1, 2, 4, "bar"];
+/** Grade de edição (DESIGN §3.8 / Etapa 6): unidade em que as durações são ajustadas. */
+export type Grid = 0.25 | 0.5 | 1 | 2 | 4 | "bar";
+export const GRIDS: Grid[] = [0.25, 0.5, 1, 2, 4, "bar"];
 /** Tamanho da grade em tempos, na fórmula de compasso dada. */
 export const gridBeats = (grid: Grid, [beatsPerBar]: Meter) => (grid === "bar" ? beatsPerBar : grid);
 

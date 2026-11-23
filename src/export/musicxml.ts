@@ -1,9 +1,12 @@
 // Export MusicXML 4.0 (score-partwise) para DAWs e editores de partitura.
-// Duas partes (Acordes em clave de sol / Baixo em clave de fá), arranjo linear (repetições e casa 2
-// desenroladas), <harmony> em cada acorde, compassos reais com ligaduras, armadura/compasso/andamento por bloco.
+// Sem melodia: duas partes (P1 Acordes em clave de sol / P2 Baixo em clave de fá).
+// Com melodia: três partes (P1 Melodia em clave de sol / P2 Acordes em clave de sol / P3 Baixo em clave de fá),
+// com arranjo linear (repetições e casa 2 desenroladas), <harmony> em cada acorde/N.C. e compassos reais com ligaduras.
 
 import { instrumentByPatchID } from "@tonejs/midi/dist/InstrumentMaps";
 import { gmProgram } from "../audio/render";
+import { isRest } from "../core/chords";
+import { DEFAULT_MELODY_INSTRUMENT } from "../core/melody";
 import {
   AccidentalTracker,
   barCells,
@@ -11,11 +14,14 @@ import {
   chordKind,
   chordParts,
   DIV_PER_QUARTER,
+  melodyBarCells,
   noteType,
   parseNoteName,
   spellChordNotes,
+  spellMelodyNote,
   xmlEscape as esc,
   type Cell,
+  type MelodyCell,
   type NotationOptions,
   type Segment,
   type SpelledNote,
@@ -23,6 +29,10 @@ import {
 import type { Song } from "../core/song";
 
 export type MusicXmlOptions = NotationOptions & {
+  /** Programa GM (1–128) da parte de melodia. Padrão: `song.melodyInstrument` (ou epiano). */
+  melodyProgram?: number;
+  /** Canal MIDI (1–16) da parte de melodia na partitura. Padrão: 2. */
+  melodyChannel?: number;
   /** Programa GM (1–128) da parte de acordes. Padrão: o do instrumento da música. */
   chordsProgram?: number;
   /** Programa GM (1–128) da parte de baixo. Padrão: 33 (baixo acústico). */
@@ -33,11 +43,14 @@ const ACCIDENTAL: Record<number, string> = { [-2]: "flat-flat", [-1]: "flat", 0:
 const UNIT_NAME: Record<number, string> = { 2: "half", 4: "quarter", 8: "eighth", 16: "16th" };
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-type PartKind = "chords" | "bass";
+type PartKind = "melody" | "chords" | "bass";
 
 export function songToMusicXml(song: Song, opts: MusicXmlOptions = {}): string {
   const segments = buildSegments(song, opts);
   const title = opts.title?.trim() || "Chordplanner";
+  const hasMelody = segments.some((s) => s.hasMelody);
+  const melodyProgram = opts.melodyProgram ?? gmProgram(song.melodyInstrument ?? DEFAULT_MELODY_INSTRUMENT, instrumentByPatchID) + 1;
+  const melodyChannel = opts.melodyChannel ?? 2;
   const chordsProgram = opts.chordsProgram ?? gmProgram(song.instrument, instrumentByPatchID) + 1;
   const bassProgram = opts.bassProgram ?? 33;
 
@@ -48,10 +61,19 @@ export function songToMusicXml(song: Song, opts: MusicXmlOptions = {}): string {
   out.push(`  <work><work-title>${esc(title)}</work-title></work>`);
   out.push("  <identification><encoding><software>Chordplanner</software></encoding></identification>");
   out.push("  <part-list>");
-  for (const [id, name, program, channel] of [
-    ["P1", "Acordes", chordsProgram, 1],
-    ["P2", "Baixo", bassProgram, 2],
-  ] as const) {
+
+  const defs = hasMelody
+    ? ([
+        ["P1", "Melodia", melodyProgram, melodyChannel, "melody"],
+        ["P2", "Acordes", chordsProgram, 1, "chords"],
+        ["P3", "Baixo", bassProgram, 3, "bass"],
+      ] as const)
+    : ([
+        ["P1", "Acordes", chordsProgram, 1, "chords"],
+        ["P2", "Baixo", bassProgram, 2, "bass"],
+      ] as const);
+
+  for (const [id, name, program, channel] of defs) {
     out.push(
       `    <score-part id="${id}"><part-name>${name}</part-name>` +
         `<score-instrument id="${id}-I1"><instrument-name>${name}</instrument-name></score-instrument>` +
@@ -59,8 +81,9 @@ export function songToMusicXml(song: Song, opts: MusicXmlOptions = {}): string {
     );
   }
   out.push("  </part-list>");
-  out.push(part("P1", "chords", segments));
-  out.push(part("P2", "bass", segments));
+  for (const [id, , , , kind] of defs) {
+    out.push(part(id, kind, segments, hasMelody));
+  }
   out.push("</score-partwise>");
   return out.join("\n") + "\n";
 }
@@ -68,13 +91,14 @@ export function songToMusicXml(song: Song, opts: MusicXmlOptions = {}): string {
 const keyId = (s: Segment) => `${s.sig.fifths}:${s.sig.mode ?? ""}`;
 const meterId = (s: Segment) => s.meter.join("/");
 
-function part(id: string, kind: PartKind, segments: Segment[]): string {
+function part(id: string, kind: PartKind, segments: Segment[], hasMelody: boolean): string {
   const out: string[] = [`  <part id="${id}">`];
   const tracker = new AccidentalTracker(0);
   let measureNo = 0;
   let prev: Segment | null = null;
   let lastTempo = "";
   const total = segments.reduce((n, s) => n + s.bars.length, 0);
+  const topStaff = kind === (hasMelody ? "melody" : "chords");
 
   for (const seg of segments) {
     const spellFor = seg.spell;
@@ -88,13 +112,13 @@ function part(id: string, kind: PartKind, segments: Segment[]): string {
         if (!prev) attrs.push(`<divisions>${DIV_PER_QUARTER}</divisions>`);
         if (newKey) attrs.push(`<key><fifths>${seg.sig.fifths}</fifths>${seg.sig.mode ? `<mode>${seg.sig.mode}</mode>` : ""}</key>`);
         if (newMeter) attrs.push(`<time><beats>${seg.meter[0]}</beats><beat-type>${seg.meter[1]}</beat-type></time>`);
-        if (!prev) attrs.push(kind === "chords" ? "<clef><sign>G</sign><line>2</line></clef>" : "<clef><sign>F</sign><line>4</line></clef>");
+        if (!prev) attrs.push(kind === "bass" ? "<clef><sign>F</sign><line>4</line></clef>" : "<clef><sign>G</sign><line>2</line></clef>");
         m.push(`      <attributes>${attrs.join("")}</attributes>`);
       }
       if (newKey) tracker.setKey(seg.sig.fifths);
       tracker.startBar();
 
-      if (kind === "chords" && bi === 0) {
+      if (topStaff && bi === 0) {
         const unit = UNIT_NAME[seg.meter[1]] ?? "quarter";
         const tempoKey = `${seg.bpm}/${seg.meter[1]}/${seg.rampTo ?? ""}`;
         m.push(`      <direction placement="above"><direction-type><rehearsal>${esc(seg.label)}</rehearsal></direction-type></direction>`);
@@ -110,18 +134,21 @@ function part(id: string, kind: PartKind, segments: Segment[]): string {
         }
       }
 
-      for (const cell of barCells(bar, seg.meter)) m.push(...cellXml(cell, kind, spellFor, tracker));
+      if (kind === "melody") {
+        for (const cell of melodyBarCells(seg.melodyBars[bi], seg.meter)) m.push(...melodyCellXml(cell, spellFor, tracker));
+      } else {
+        for (const cell of barCells(bar, seg.meter)) m.push(...cellXml(cell, kind, spellFor, tracker));
+      }
       if (measureNo === total) m.push('      <barline location="right"><bar-style>light-heavy</bar-style></barline>');
       out.push(`    <measure number="${measureNo}">`, ...m, "    </measure>");
       prev = seg;
     });
-    // Bloco sem acordes: não gera compassos; não altera `prev`.
   }
   if (!total) {
     // Partitura vazia ainda precisa de um compasso válido.
     out.push(
       '    <measure number="1">',
-      `      <attributes><divisions>${DIV_PER_QUARTER}</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time>${kind === "chords" ? "<clef><sign>G</sign><line>2</line></clef>" : "<clef><sign>F</sign><line>4</line></clef>"}</attributes>`,
+      `      <attributes><divisions>${DIV_PER_QUARTER}</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time>${kind === "bass" ? "<clef><sign>F</sign><line>4</line></clef>" : "<clef><sign>G</sign><line>2</line></clef>"}</attributes>`,
       `      <note><rest measure="yes"/><duration>${DIV_PER_QUARTER * 4}</duration><voice>1</voice></note>`,
       "    </measure>",
     );
@@ -130,7 +157,21 @@ function part(id: string, kind: PartKind, segments: Segment[]): string {
   return out.join("\n");
 }
 
-function cellXml(cell: Cell, kind: PartKind, spell: Segment["spell"], tracker: AccidentalTracker): string[] {
+function melodyCellXml(cell: MelodyCell, spell: Segment["spell"], tracker: AccidentalTracker): string[] {
+  const { type, dots } = noteType(cell.durDiv);
+  const common = `<duration>${cell.durDiv}</duration>`;
+  if (cell.pitch === undefined) {
+    return [`      <note><rest/>${common}<voice>1</voice><type>${type}</type>${"<dot/>".repeat(dots)}</note>`];
+  }
+  const n = spellMelodyNote(cell.pitch, spell);
+  const show = tracker.use(n);
+  const accidental = show && !(cell.tieIn && cell.startDiv === 0) ? `<accidental>${ACCIDENTAL[n.alter]}</accidental>` : "";
+  const notations = cell.tieIn || cell.tieOut ? `<notations>${cell.tieIn ? '<tied type="stop"/>' : ""}${cell.tieOut ? '<tied type="start"/>' : ""}</notations>` : "";
+  const tail = `${cell.tieIn ? '<tie type="stop"/>' : ""}${cell.tieOut ? '<tie type="start"/>' : ""}<voice>1</voice><type>${type}</type>${"<dot/>".repeat(dots)}${accidental}${notations}`;
+  return [`      <note>${pitchXml(n)}${common}${tail}</note>`];
+}
+
+function cellXml(cell: Cell, kind: "chords" | "bass", spell: Segment["spell"], tracker: AccidentalTracker): string[] {
   const { type, dots } = noteType(cell.durDiv);
   const common = `<duration>${cell.durDiv}</duration>`;
   const tail = (extra = "") => `${cell.tieIn ? '<tie type="stop"/>' : ""}${cell.tieOut ? '<tie type="start"/>' : ""}<voice>1</voice><type>${type}</type>${"<dot/>".repeat(dots)}${extra}`;
@@ -138,7 +179,13 @@ function cellXml(cell: Cell, kind: PartKind, spell: Segment["spell"], tracker: A
   const lines: string[] = [];
 
   if (!cell.ref) return rest();
-  const { chord, voiced } = cell.ref;
+  const { chord, voiced, isPadding } = cell.ref;
+  if (isRest(chord)) {
+    if (kind === "chords" && cell.first && !isPadding) {
+      lines.push('      <harmony><root><root-step>C</root-step></root><kind text="N.C.">none</kind></harmony>');
+    }
+    return [...lines, ...rest()];
+  }
   if (kind === "chords" && cell.first) lines.push(harmonyXml(chord, spell));
 
   const midis = kind === "bass" ? voiced.slice(0, 1) : voiced.slice(1);

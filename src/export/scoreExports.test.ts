@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { makeChord, type Chord } from "../core/chords";
+import { makeChord, makeRest, type Chord } from "../core/chords";
+import { makeMelodyNote } from "../core/melody";
 import type { Modifier } from "../core/modifiers";
 import { chordKind } from "../core/notation";
 import { makeBlock, makeSong, type Song } from "../core/song";
@@ -225,5 +226,109 @@ describe("correções da revisão", () => {
     const doc = new DOMParser().parseFromString(xml, "application/xml");
     expect(doc.getElementsByTagName("fifths")[0].textContent).toBe("0");
     expect(doc.getElementsByTagName("mode")[0].textContent).toBe("dorian");
+  });
+});
+
+function melodyFixture(): Song {
+  const song = makeSong();
+  song.bpm = 110;
+  song.melodyInstrument = "flute";
+  const a = song.blocks[song.arrangement[0].blockId];
+  a.name = "Tema";
+  a.key = { tonic: 5, scaleId: "major" }; // F maior (1 bemol: B♭)
+  a.chords = [makeChord(5, "maj", 2), makeRest(1.75), makeChord(0, "maj", 0.25), makeChord(5, "maj", 4)];
+  a.melody = [
+    makeMelodyNote(70, 0, 1.5), // Bb4
+    makeMelodyNote(69, 1.5, 0.25), // semicolcheia A4
+    makeMelodyNote(67, 2, 2), // G4 sobre N.C.
+    makeMelodyNote(65, 4, 2), // F4
+  ];
+  a.melodyEnding = [makeMelodyNote(77, 0, 4)]; // F5 na casa 2
+  song.arrangement[0].repeat = 2;
+
+  const solo = makeBlock("SoloMel", 1, []);
+  solo.melody = [makeMelodyNote(60, 0, 4)];
+  song.blocks[solo.id] = solo;
+  song.arrangement.push({ id: "solo", blockId: solo.id, repeat: 1 });
+  return song;
+}
+
+describe("Etapa 6: Melodia, N.C. e 0.25 tempo nos exportadores", () => {
+  it("MusicXML com melodia gera 3 partes (P1 Melodia, P2 Acordes, P3 Baixo), <kind>none</kind> e 16th", () => {
+    const xml = songToMusicXml(melodyFixture(), { title: "Melodia v4" });
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    expect(doc.getElementsByTagName("parsererror").length).toBe(0);
+
+    const partNames = [...doc.getElementsByTagName("part-name")].map((p) => p.textContent);
+    expect(partNames).toEqual(["Melodia", "Acordes", "Baixo"]);
+
+    const parts = [...doc.getElementsByTagName("part")];
+    expect(parts).toHaveLength(3);
+    for (const part of parts) {
+      let divisions = 0;
+      let beats = 4;
+      let beatType = 4;
+      const measures = [...part.getElementsByTagName("measure")];
+      expect(measures).toHaveLength(5); // 2 + 2 (casa 2) + 1 (bloco só de melodia)
+      for (const m of measures) {
+        divisions = Number(m.getElementsByTagName("divisions")[0]?.textContent ?? divisions);
+        beats = Number(m.getElementsByTagName("beats")[0]?.textContent ?? beats);
+        beatType = Number(m.getElementsByTagName("beat-type")[0]?.textContent ?? beatType);
+        const sum = [...m.getElementsByTagName("note")]
+          .filter((n) => !n.getElementsByTagName("chord").length)
+          .reduce((acc, n) => acc + Number(n.getElementsByTagName("duration")[0].textContent), 0);
+        expect(sum).toBe((beats * divisions * 4) / beatType);
+      }
+    }
+
+    // B♭4 em F maior na P1 sai grafado como step B, alter -1
+    const firstNote = parts[0].getElementsByTagName("measure")[0].getElementsByTagName("note")[0];
+    expect(firstNote.getElementsByTagName("step")[0].textContent).toBe("B");
+    expect(firstNote.getElementsByTagName("alter")[0].textContent).toBe("-1");
+    expect(xml).toContain("<type>16th</type>");
+    expect(xml).toContain('<kind text="N.C.">none</kind>');
+    // Último compasso da 2ª passada usa melodyEnding (F5)
+    const p1Measures = [...parts[0].getElementsByTagName("measure")];
+    expect(p1Measures[3].getElementsByTagName("octave")[0].textContent).toBe("5");
+  });
+
+  it("ABC com melodia emite 3 vozes, L:1/16 e 'N.C.' com soma exata por compasso", () => {
+    const abc = songToAbc(melodyFixture(), { title: "ABC v4" });
+    expect(abc).toContain("L:1/16\n");
+    expect(abc).toContain("%%score {1 | 2 | 3}");
+    expect(abc).toContain('V:1 clef=treble name="Melodia"');
+    expect(abc).toContain('V:2 clef=treble name="Acordes"');
+    expect(abc).toContain('V:3 clef=bass name="Baixo"');
+    expect(abc).toContain('"N.C."');
+    const lines = abc.split("\n");
+    const unit = Number(lines.find((l) => l.startsWith("L:1/"))!.slice(4));
+    for (const v of ["V:1", "V:2", "V:3"] as const) {
+      let current = "";
+      const sums: number[] = [];
+      for (const line of lines) {
+        if (line.startsWith("V:")) current = line.slice(0, 3);
+        else if (current === v && !/^[A-Z%]:|^%%/.test(line)) {
+          const text = line.replace(/"[^"]*"/g, "").replace(/\[[KMQ]:[^\]]*\]/g, "");
+          for (const bar of text.split(/\|\]?/).map((b) => b.trim()).filter(Boolean)) {
+            let sum = 0;
+            for (const t of bar.matchAll(/(\[[^\]]+\]|[=^_]*[A-Ga-gz][,']*)(\d*)-?/g)) sum += (t[2] ? Number(t[2]) : 1) / unit;
+            sums.push(sum);
+          }
+        }
+      }
+      expect(sums).toHaveLength(5);
+      for (const s of sums) expect(s).toBeCloseTo(1, 9);
+    }
+  });
+
+  it("ChordPro emite [N.C.], sub-tempos 0.25 e bloco só de melodia", () => {
+    const cho = songToChordPro(melodyFixture(), undefined, { title: "CHO v4" });
+    expect(cho).toContain("[F] . [N.C.] .~[C]");
+    expect(cho).toContain("{start_of_verse: SoloMel}");
+    expect(cho).toContain("| [N.C.] . . . |");
+
+    const song = bareSong([mk(0, "maj", 4)]);
+    song.blocks[song.arrangement[0].blockId].melody = [makeMelodyNote(64, 0, 8)];
+    expect(songToChordPro(song, undefined, { title: "Ext" })).toContain("| [C] . . . | [N.C.] . . . |");
   });
 });

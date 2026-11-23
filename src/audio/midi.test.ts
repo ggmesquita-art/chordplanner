@@ -1,6 +1,7 @@
 import { Midi } from "@tonejs/midi";
 import { describe, expect, it, vi } from "vitest";
-import { makeChord } from "../core/chords";
+import { makeChord, makeRest } from "../core/chords";
+import { makeMelodyNote } from "../core/melody";
 import { expandArrangement, expandRegion, makeBlock, makeSong } from "../core/song";
 import { songToMidi } from "../export/midi";
 import { configureMidi, DEFAULT_MIDI, initMidi, midiActive, noteOff, noteOn, panic } from "./midi";
@@ -343,5 +344,32 @@ describe("export .mid: bordão por bloco", () => {
     expect(drones(2).map((n) => n.midi)).toEqual([38]);
     expect(drones(9).map((n) => n.midi)).toEqual([45]);
     expect(drones(null)).toEqual([]);
+  });
+});
+
+describe("export .mid: melodia, melodyEnding e N.C.", () => {
+  it("exporta trilha Melodia no canal configurado, lyrics N.C. em pausas explícitas e casa 2", () => {
+    const song = makeSong();
+    song.bpm = 120;
+    song.arrangement[0].repeat = 2;
+    const b = song.blocks[song.arrangement[0].blockId];
+    b.chords = [makeChord(0, "maj", 4), makeRest(4)];
+    b.melody = [makeMelodyNote(64, 0, 2), makeMelodyNote(67, 4, 2)];
+    b.melodyEnding = [makeMelodyNote(72, 0, 4)];
+
+    const solo = makeBlock("Só Melodia", 1, []);
+    solo.melody = [makeMelodyNote(69, 0, 2)];
+    song.blocks[solo.id] = solo;
+    song.arrangement.push({ id: "s", blockId: solo.id, repeat: 1 });
+
+    const midi = new Midi(songToMidi(song, { channel: 1, melodyChannel: 4, splitBass: true }));
+    const melTrack = midi.tracks.find((t) => t.name === "Melodia");
+    expect(melTrack).toBeDefined();
+    expect(melTrack!.channel).toBe(3); // canal MIDI 4 (0-based = 3)
+    expect(melTrack!.notes.map((n) => n.midi)).toEqual([64, 67, 64, 72, 69]);
+
+    const lyrics = midi.header.meta.filter((m) => m.type === "lyrics").map((m) => m.text);
+    // Bloco "Só Melodia" usa padding sintético -> não emite lyric; os 2 respiros explícitos emitem "N.C."
+    expect(lyrics).toEqual(["C", "N.C.", "C", "N.C."]);
   });
 });

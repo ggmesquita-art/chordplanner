@@ -24,7 +24,8 @@ beforeEach(() => {
   const st = useStore.getState();
   st.newSong();
   st.setMode("colorful");
-  st.setTonic(0); // Dó maior, com a tônica já na progressão
+  st.setTonic(0); // Dó maior
+  st.addChord(0, "maj"); // com a tônica já na progressão
 });
 afterEach(cleanup);
 

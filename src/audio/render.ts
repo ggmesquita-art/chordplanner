@@ -2,6 +2,7 @@
 // arranjo expandido. Puro, sem Web Audio: usado pelo áudio do navegador, pela
 // saída MIDI e pelo export .mid — assim o arquivo soa como o que se ouve.
 
+import { isRest } from "../core/chords";
 import type { Expanded, PlaybackPattern, TimedChord } from "../core/song";
 import { barLinesWithin, isCompound, rampSeconds, secondsPerBeat, swingOffset } from "../core/timeline";
 import { fitToRange, voiceChord } from "../core/voicing";
@@ -18,7 +19,9 @@ export type NoteEvent = {
   channel: number;
   /** Nota do baixo (grave separado do voicing) — vai para a trilha de baixo no export. */
   isBass: boolean;
-  /** Índice do acorde em `expanded.events`. */
+  /** Nota pertencente à pista de melodia. */
+  isMelody?: boolean;
+  /** Índice do acorde em `expanded.events` (-1 para eventos da melodia). */
   eventIndex: number;
   instrument: string;
 };
@@ -30,6 +33,7 @@ export type RenderOptions = {
   /** Dedilhado e variação aleatória de intensidade/tempo. */
   humanize: boolean;
   channelFor?: (blockId: string) => number;
+  melodyChannelFor?: (blockId: string) => number;
   rng?: () => number;
   /** Tônica (pitch class 0–11) do bloco, para o bordão; null/ausente = sem bordão. */
   tonicFor?: (blockId: string) => number | null;
@@ -75,14 +79,18 @@ type Hit = Pick<NoteEvent, "midi" | "time" | "duration" | "velocity">;
  */
 export function strike(notes: number[], start: number, duration: number, velocity: number, strum: number, humanize: boolean, rng: () => number): Hit[] {
   const last = notes.length - 1;
+  const effStrum = notes.length > 1 && humanize && strum > 0 ? Math.min(strum, Math.max(0, (duration * 0.4) / (notes.length - 1))) : 0;
+  const maxJitter = humanize ? Math.min(0.004, duration * 0.05) : 0;
   return notes.map((midi, i) => {
     const accent = i === 0 ? 1.05 : i === last ? 1 : 0.86;
     const jitter = humanize ? (rng() - 0.5) * 0.08 : 0;
-    const offset = humanize ? i * strum + rng() * 0.004 : 0;
+    const offset = humanize ? i * effStrum + rng() * maxJitter : 0;
+    const rem = Math.max(0.02, duration - offset);
+    const dur = duration >= 0.05 ? Math.min(rem, Math.max(0.05, duration - (humanize ? i * effStrum : 0))) : rem;
     return {
       midi,
       time: start + offset,
-      duration: Math.max(0.05, duration - (humanize ? i * strum : 0)),
+      duration: dur,
       velocity: Math.max(0.1, Math.min(1, velocity * accent + jitter)),
     };
   });
@@ -100,6 +108,8 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
     const pass = `${ev.itemIndex}:${ev.repetition}`;
     if (pass !== prevPass) prevNotes = null;
     prevPass = pass;
+    // Pausa (N.C.) ou preenchimento de melodia: silencia acordes e baixo mantendo `prevNotes` intacto.
+    if (isRest(ev.chord)) return;
     const voiced = voiceChord(ev.chord, opts.voiceLeading ? prevNotes : null);
     if (opts.voiceLeading) prevNotes = voiced;
 
@@ -148,24 +158,62 @@ export function renderNotes(expanded: Expanded, opts: RenderOptions): NoteEvent[
       }
     } else if (pattern === "arp-up" || pattern === "arp-down") {
       const seq = pattern === "arp-up" ? notes : [...notes].reverse();
-      const steps = Math.max(1, Math.floor(ev.beats / 0.5));
+      const stepBeats = ev.beats < 0.5 ? ev.beats : 0.5;
+      const steps = Math.max(1, Math.floor(ev.beats / stepBeats + 1e-9));
+      const endLimit = ev.startSec + ev.durationSec;
       for (let k = 0; k < steps; k++) {
-        const t0 = k * 0.5 + swingOffset(opts.swing, k);
-        const ring = opts.fitToInstrument && def.envelope === "decay" ? spanSec(ev, k * 0.5, 1) : spanSec(ev, k * 0.5, 0.5) * 0.92;
+        const sw = stepBeats >= 0.5 ? swingOffset(opts.swing, k) : 0;
+        const tBeat = k * stepBeats + sw;
+        if (tBeat >= ev.beats - 1e-9) continue;
+        const noteTime = at(tBeat);
+        const rawRing =
+          opts.fitToInstrument && def.envelope === "decay" && stepBeats >= 0.5
+            ? spanSec(ev, k * stepBeats, 1)
+            : spanSec(ev, k * stepBeats, stepBeats) * 0.92;
+        const ring = Math.max(0.02, Math.min(rawRing, endLimit - noteTime));
         const velocity = (k % 2 === 0 ? 0.72 : 0.6) + (opts.humanize ? (rng() - 0.5) * 0.06 : 0);
-        push([{ midi: seq[k % seq.length], time: at(t0), duration: ring, velocity }]);
+        push([{ midi: seq[k % seq.length], time: noteTime, duration: ring, velocity }]);
       }
     } else {
       // Comping: 1, "e" do 2, 3, "e" do 4 (em janelas de 4 tempos).
+      const endLimit = ev.startSec + ev.durationSec;
       for (let b = 0; b < ev.beats; b += 4) {
         for (const off of [0, 1.5, 2, 3.5]) {
-          if (b + off >= ev.beats) continue;
+          if (b + off >= ev.beats - 1e-9) continue;
           const eighth = Math.round((b + off) / 0.5);
-          push(strike(notes, at(b + off + swingOffset(opts.swing, eighth)), spanSec(ev, b + off, 0.45), off % 1 ? 0.55 : 0.7, strum, opts.humanize, rng));
+          const tBeat = b + off + swingOffset(opts.swing, eighth);
+          if (tBeat >= ev.beats - 1e-9) continue;
+          const lenBeats = Math.min(0.45, ev.beats - tBeat);
+          const durSec = Math.max(0.02, Math.min(spanSec(ev, b + off, lenBeats), endLimit - at(tBeat)));
+          push(strike(notes, at(tBeat), durSec, off % 1 ? 0.55 : 0.7, strum, opts.humanize, rng));
         }
       }
     }
   });
+
+  // Pista de melodia: notas monofônicas com suporte a swing em colcheias fracas e tessitura do timbre.
+  for (const m of expanded.melodyEvents ?? []) {
+    const def = getInstrumentDef(m.instrument);
+    const midi = opts.fitToInstrument ? fitToRange([m.note.pitch], def.range).notes[0] : m.note.pitch;
+    if (midi === undefined) continue;
+    const isWeakEighth = Math.abs((m.blockBeat % 1) - 0.5) < 1e-4;
+    const swingSec = opts.swing > 0 && isWeakEighth ? swingOffset(opts.swing, 1) * (60 / m.bpm) : 0;
+    const maxSwing = Math.min(swingSec, Math.max(0, m.durationSec * 0.45));
+    const time = m.startSec + maxSwing;
+    const avail = Math.max(0.005, m.durationSec - maxSwing);
+    const duration = Math.min(avail, Math.max(0.005, avail * 0.96));
+    out.push({
+      midi,
+      time,
+      duration,
+      velocity: m.note.velocity ?? 0.82,
+      channel: opts.melodyChannelFor?.(m.blockId) ?? 2,
+      isBass: false,
+      isMelody: true,
+      eventIndex: -1,
+      instrument: m.instrument,
+    });
+  }
 
   renderDrones(expanded, opts, out);
   return out;

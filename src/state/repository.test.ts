@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSong } from "../core/song";
+import { CURRENT_VERSION } from "../export/migrate";
 import { LocalSongRepository, type Session } from "./repository";
 
 const session = (over: Partial<Session> = {}): Session => ({
-  version: 1,
+  version: CURRENT_VERSION,
   scaleId: "major",
   tonic: 0,
   accidentals: "auto",
@@ -79,21 +80,23 @@ describe("LocalSongRepository", () => {
 describe("versão do formato", () => {
   beforeEach(() => localStorage.clear());
 
-  it("sessão com versão futura ou inválida é descartada", () => {
+  it("sessão com versão futura ou inválida é descartada; v1 migra para versão atual", () => {
     const repo = new LocalSongRepository();
-    for (const version of [2, 0, "1"]) {
+    for (const version of [CURRENT_VERSION + 1, 0, "1"]) {
       localStorage.setItem("chordplanner:session", JSON.stringify({ ...session(), version }));
       expect(repo.loadSession()).toBeNull();
     }
+    localStorage.setItem("chordplanner:session", JSON.stringify({ ...session(), version: 1 }));
+    expect(repo.loadSession()?.version).toBe(CURRENT_VERSION);
   });
 
-  it("músicas salvas ganham version ao gravar; sem campo conta como versão 1", () => {
+  it("músicas salvas ganham version ao gravar; v1 migra para a versão atual", () => {
     const repo = new LocalSongRepository();
     const song = makeSong();
-    expect(repo.saveSong({ id: "a", name: "A", updatedAt: 1, version: 1, scaleId: "major", tonic: 0, song })).toBe(true);
-    expect(JSON.parse(localStorage.getItem("chordplanner:songs")!).a.version).toBe(1);
+    expect(repo.saveSong({ id: "a", name: "A", updatedAt: 1, version: CURRENT_VERSION, scaleId: "major", tonic: 0, song })).toBe(true);
+    expect(JSON.parse(localStorage.getItem("chordplanner:songs")!).a.version).toBe(CURRENT_VERSION);
     localStorage.setItem("chordplanner:songs", JSON.stringify({ b: { id: "b", name: "B", updatedAt: 2, scaleId: "major", tonic: 0, song }, c: { id: "c", name: "C", updatedAt: 3, version: 99, scaleId: "major", tonic: 0, song } }));
-    expect(repo.loadSong("b")?.version).toBe(1);
+    expect(repo.loadSong("b")?.version).toBe(CURRENT_VERSION);
     expect(repo.loadSong("c")).toBeNull();
     expect(repo.listSongs().map((m) => m.id)).toEqual(["b"]);
   });
