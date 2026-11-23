@@ -217,6 +217,8 @@ export type DesktopAIServerStatus = {
   starting: boolean;
   managed: boolean;
   pid: number | null;
+  port?: number;
+  url?: string;
   message: string;
   missingPython?: boolean;
   missingDeps?: boolean;

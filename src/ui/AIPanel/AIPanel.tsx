@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AI_GENRES,
@@ -72,6 +72,24 @@ const GENRE_LABELS: Record<string, string> = {
   folk: "Folk / Acústico",
 };
 
+function isValidAIModel(name: string): name is AIGenModelName {
+  return (AI_MODELS as readonly string[]).includes(name);
+}
+
+function pickAutoInstalledModel(h: AIHealthStatus, current: AIGenModelName): AIGenModelName {
+  const installedSet = new Set(installedModelNames(h));
+  const installedKnown = AI_MODELS.filter((m) => installedSet.has(m));
+  if (installedKnown.length === 0) return current;
+  if (installedSet.has(current)) return current;
+  if (h.default_model && isValidAIModel(h.default_model) && installedSet.has(h.default_model)) {
+    return h.default_model;
+  }
+  if (h.device?.toLowerCase() === "cpu" && installedSet.has("yellow_small")) {
+    return "yellow_small";
+  }
+  return installedKnown[0];
+}
+
 export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl }: Props) {
   const song = useStore((s) => s.song);
   const block = useStore((s) => selectBlock(s));
@@ -111,6 +129,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
   const [inpaintEndBar, setInpaintEndBar] = useState<number>(Math.min(2, blockBars));
   const [inpaintRoles, setInpaintRoles] = useState<TrackRole[]>(["chords", "melody"]);
 
+  const [activeServerUrl, setActiveServerUrl] = useState<string>(serverUrl);
   const [health, setHealth] = useState<AIHealthStatus | null>(null);
   const [healthState, setHealthState] = useState<"checking" | "online" | "offline">("checking");
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -133,9 +152,19 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
   const mountedRef = useRef(true);
   const healthSeqRef = useRef(0);
   const skillSeedRef = useRef(1);
+  const modelManuallyChosenRef = useRef(false);
   useEffect(() => {
     onCloseRef.current = onClose;
   });
+
+  const applyOnlineHealth = useCallback((h: AIHealthStatus) => {
+    setHealth(h);
+    setHealthState("online");
+    setHealthError(null);
+    if (!modelManuallyChosenRef.current) {
+      setModelName((current) => pickAutoInstalledModel(h, current));
+    }
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -156,24 +185,29 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     let cancelled = false;
     const seq = ++healthSeqRef.current;
     const isCurrent = () => !cancelled && mountedRef.current && healthSeqRef.current === seq;
-    const client = createMusicAIClient(serverUrl, fetchImpl);
     const bridge = getDesktopAIBridge();
 
     const init = async () => {
+      let currentUrl = serverUrl;
+      if (bridge) {
+        try {
+          const initialStatus = await bridge.getServerStatus();
+          if (!isCurrent()) return;
+          setDesktopStatus(initialStatus);
+          if (initialStatus.url) {
+            currentUrl = initialStatus.url;
+            setActiveServerUrl(initialStatus.url);
+          }
+        } catch {
+          // segue tentando health na URL padrão
+        }
+      }
+
+      const client = createMusicAIClient(currentUrl, fetchImpl);
       try {
         const h = await client.checkHealth();
         if (!isCurrent()) return;
-        setHealth(h);
-        setHealthState("online");
-        setHealthError(null);
-        if (bridge) {
-          bridge
-            .getServerStatus()
-            .then((s) => {
-              if (isCurrent()) setDesktopStatus(s);
-            })
-            .catch(() => {});
-        }
+        applyOnlineHealth(h);
       } catch (err: unknown) {
         if (!isCurrent()) return;
         if (bridge) {
@@ -183,13 +217,13 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
             const startRes = await bridge.startServer();
             if (!isCurrent()) return;
             setDesktopStatus(startRes);
+            const targetUrl = startRes.url || currentUrl;
+            if (startRes.url) setActiveServerUrl(startRes.url);
             if (startRes.ok) {
               try {
-                const h = await client.checkHealth();
+                const h = await createMusicAIClient(targetUrl, fetchImpl).checkHealth();
                 if (!isCurrent()) return;
-                setHealth(h);
-                setHealthState("online");
-                setHealthError(null);
+                applyOnlineHealth(h);
               } catch (healthErr: unknown) {
                 if (!isCurrent()) return;
                 setHealth(null);
@@ -227,27 +261,32 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     return () => {
       cancelled = true;
     };
-  }, [serverUrl, fetchImpl]);
+  }, [serverUrl, fetchImpl, applyOnlineHealth]);
 
-  const refreshHealth = async () => {
+  const refreshHealth = async (urlOverride?: string) => {
     const seq = ++healthSeqRef.current;
     const isCurrent = () => mountedRef.current && healthSeqRef.current === seq;
     setHealthState("checking");
     setHealthError(null);
     const bridge = getDesktopAIBridge();
-    try {
-      const h = await createMusicAIClient(serverUrl, fetchImpl).checkHealth();
-      if (!isCurrent()) return;
-      setHealth(h);
-      setHealthState("online");
-      if (bridge) {
-        bridge
-          .getServerStatus()
-          .then((s) => {
-            if (isCurrent()) setDesktopStatus(s);
-          })
-          .catch(() => {});
+    let targetUrl = urlOverride ?? activeServerUrl;
+    if (bridge && !urlOverride) {
+      try {
+        const s = await bridge.getServerStatus();
+        if (!isCurrent()) return;
+        setDesktopStatus(s);
+        if (s.url) {
+          targetUrl = s.url;
+          setActiveServerUrl(s.url);
+        }
+      } catch {
+        // segue com activeServerUrl
       }
+    }
+    try {
+      const h = await createMusicAIClient(targetUrl, fetchImpl).checkHealth();
+      if (!isCurrent()) return;
+      applyOnlineHealth(h);
     } catch (err) {
       if (!isCurrent()) return;
       setHealth(null);
@@ -272,13 +311,13 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
       const res = await bridge.startServer();
       if (!isCurrent()) return;
       setDesktopStatus(res);
+      const targetUrl = res.url || activeServerUrl;
+      if (res.url) setActiveServerUrl(res.url);
       if (res.ok) {
-        const h = await createMusicAIClient(serverUrl, fetchImpl).checkHealth();
+        const h = await createMusicAIClient(targetUrl, fetchImpl).checkHealth();
         if (!isCurrent()) return;
-        setHealth(h);
-        setHealthState("online");
-        setHealthError(null);
-        setStatusMsg("Servidor IA iniciado e conectado.");
+        applyOnlineHealth(h);
+        setStatusMsg(res.message || "Servidor IA iniciado e conectado.");
       } else {
         setHealth(null);
         setHealthState("offline");
@@ -329,7 +368,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     setDownloadAuthRequired(false);
     setLoadingAction("download");
     try {
-      const res = await createMusicAIClient(serverUrl, fetchImpl).downloadModel({
+      const res = await createMusicAIClient(activeServerUrl, fetchImpl).downloadModel({
         model_name: modelName,
         hf_token: hfToken.trim() || null,
         save_token: saveHfToken,
@@ -441,7 +480,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     setLoadingAction("plan");
     try {
       const req = buildCurrentRequest();
-      const theoreticalPlan = await createMusicAIClient(serverUrl, fetchImpl).createPlan(req);
+      const theoreticalPlan = await createMusicAIClient(activeServerUrl, fetchImpl).createPlan(req);
       if (!mountedRef.current) return;
       setPlan(theoreticalPlan);
       setStatusMsg("Plano teórico consultado via Skill music-composition.");
@@ -522,7 +561,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
     setLoadingAction("generate");
     try {
       const req = buildCurrentRequest();
-      const client = createMusicAIClient(serverUrl, fetchImpl);
+      const client = createMusicAIClient(activeServerUrl, fetchImpl);
       const res = mode === "inpaint" ? await client.inpaint(req) : await client.generate(req);
       if (!mountedRef.current) return;
       if (!res.success) {
@@ -645,7 +684,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
               }`}
             {serverAction === null &&
               healthState === "offline" &&
-              "Servidor IA offline (127.0.0.1:8765)"}
+              `Servidor IA offline (${activeServerUrl.replace(/^https?:\/\//, "")})`}
           </div>
           <div className="ai-status-actions">
             {(healthState === "offline" || serverAction === "starting") && (
@@ -697,6 +736,12 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
                       Inicie localmente com <code className="mono">python -m music_ai_module.server</code> ou
                       use o <strong>Modo Skill (sem IA)</strong> abaixo.
                     </>
+                  )}
+                  {desktopStatus?.recentLogs && desktopStatus.recentLogs.length > 0 && (
+                    <details className="ai-logs-details">
+                      <summary>Ver detalhes do log do servidor</summary>
+                      <pre className="mono">{desktopStatus.recentLogs.slice(-8).join("\n")}</pre>
+                    </details>
                   )}
                 </div>
               )
@@ -882,6 +927,7 @@ export function AIPanel({ onClose, serverUrl = DEFAULT_AI_SERVER_URL, fetchImpl 
               aria-label="Modelo"
               value={modelName}
               onChange={(e) => {
+                modelManuallyChosenRef.current = true;
                 setModelName(e.target.value as AIGenModelName);
                 setDownloadAuthRequired(false);
               }}

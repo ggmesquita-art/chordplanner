@@ -10,6 +10,13 @@
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
 - **Saúde:** typecheck, lint e build limpos; 526 testes passando no frontend (Vitest) e 48 testes passando no módulo de IA (pytest) (23/11/2026).
 
+### Entregue na v0.2.2 (23/11/2026)
+
+- **Inicialização Resiliente do `ai-server` & Seleção Inteligente de Modelo**:
+  - **Porta dinâmica no Electron (`electron/main.js`)**: verifica se `127.0.0.1:8765` está ocupada por outro processo e seleciona automaticamente uma porta livre (`8765..8785` ou efêmera), validando `/health` como servidor ChordPlanner real e propagando `port`/`url` no status IPC (`src/ai/client.ts`, `src/ui/AIPanel/AIPanel.tsx`).
+  - **Descoberta ampliada de Python no Windows**: busca ambientes `.venv_ai`/`.venv`, `where.exe python` (ignorando stubs `WindowsApps`), `py -0p` e instalações em `%LOCALAPPDATA%\Programs\Python`, exibindo logs recentes diretamente no painel offline.
+  - **Seleção automática do modelo MIDI-GPT instalado**: ao conectar em `/health`, caso o modelo selecionado não esteja instalado e o usuário ainda não tenha escolhido manualmente no `<select>`, seleciona automaticamente `health.default_model` (se instalado) ou prioriza `yellow_small` em CPU / primeiro modelo instalado em `AI_MODELS`, mantendo o card de download do Hugging Face quando nenhum checkpoint está presente.
+
 ### Entregue na v0.2.1 (23/11/2026)
 
 - **Empacotamento do Servidor IA & Modo Skill Offline**:

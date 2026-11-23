@@ -1,4 +1,4 @@
-# ChordPlanner (v0.2.1)
+# ChordPlanner (v0.2.2)
 
 Planejador de progressões de acordes guiado por escala com Roda Harmônica / Camelot, Linha do Tempo de 3 Camadas (Arranjo, Melodia e Acordes) e Módulo de Inteligência Artificial Neuro-Simbólica (`MIDI-GPT` + `music-composition` Skill).
 

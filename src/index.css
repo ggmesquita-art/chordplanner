@@ -3002,6 +3002,25 @@ section.panel-collapsed,
   font-family: var(--mono);
   font-size: 11px;
 }
+.ai-logs-details {
+  margin-top: 6px;
+}
+.ai-logs-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.ai-logs-details pre {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 140px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .ai-camelot-bar {
   display: flex;
   align-items: center;

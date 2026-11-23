@@ -577,4 +577,93 @@ describe("AIPanel & integração com Header/TopBar/Store", () => {
     const enabledMidiBtn = screen.getByRole("button", { name: /Gerar com MIDI-GPT/i }) as HTMLButtonElement;
     expect(enabledMidiBtn.disabled).toBe(false);
   });
+
+  it("adota porta alternativa retornada por window.chordplannerAI quando 8765 está ocupada", async () => {
+    const startServer = vi.fn().mockResolvedValue({
+      ok: true,
+      running: true,
+      starting: false,
+      managed: true,
+      pid: 7777,
+      port: 8766,
+      url: "http://127.0.0.1:8766",
+      message: "Servidor IA iniciado em 127.0.0.1:8766.",
+    });
+    const getServerStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      running: false,
+      starting: false,
+      managed: false,
+      pid: null,
+      port: 8765,
+      url: "http://127.0.0.1:8765",
+      message: "Servidor IA parado.",
+    });
+    vi.stubGlobal("chordplannerAI", {
+      startServer,
+      stopServer: vi.fn(),
+      getServerStatus,
+    });
+
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url === "http://127.0.0.1:8765/health") {
+        return jsonResponse({ error: "Rota não encontrada: /health" }, 404);
+      }
+      if (url === "http://127.0.0.1:8766/health") {
+        return jsonResponse(HEALTH_OK);
+      }
+      return jsonResponse({}, 404);
+    });
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+
+    await waitFor(() => expect(startServer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/Online · CUDA/i)).toBeTruthy());
+    expect(requestedUrls).toContain("http://127.0.0.1:8766/health");
+  });
+
+  it("seleciona automaticamente yellow_small quando apenas ele está instalado em CPU e preserva escolha manual", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/health")) {
+        return jsonResponse({
+          status: "ok",
+          model_loaded: true,
+          default_model: "expressive_medium",
+          available_models: [
+            { name: "expressive_medium", loaded: false, device: "cpu" },
+            { name: "yellow_small", loaded: true, device: "cpu" },
+          ],
+          models_installed: ["yellow_small"],
+          hf_repo: "Metacreation/MIDI-GPT",
+          hf_authenticated: false,
+          skill_loaded: true,
+          device: "cpu",
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    render(<AIPanel onClose={() => {}} fetchImpl={fetchMock} />);
+
+    await waitFor(() => expect(screen.getByText(/Online · CPU/i)).toBeTruthy());
+
+    const modelSelect = screen.getByLabelText("Modelo") as HTMLSelectElement;
+    expect(modelSelect.value).toBe("yellow_small");
+    expect(screen.queryByRole("region", { name: /Download de pesos do Hugging Face/i })).toBeNull();
+    const generateBtn = screen.getByRole("button", { name: /Gerar com MIDI-GPT/i }) as HTMLButtonElement;
+    expect(generateBtn.disabled).toBe(false);
+
+    // Escolha manual do usuário não deve ser sobrescrita ao atualizar /health
+    fireEvent.change(modelSelect, { target: { value: "expressive_medium" } });
+    expect(modelSelect.value).toBe("expressive_medium");
+    expect(screen.getByRole("region", { name: /Download de pesos do Hugging Face/i })).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Atualizar/i })));
+    await waitFor(() => expect(screen.getByText(/Online · CPU/i)).toBeTruthy());
+    expect((screen.getByLabelText("Modelo") as HTMLSelectElement).value).toBe("expressive_medium");
+  });
 });

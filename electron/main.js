@@ -13,6 +13,7 @@ import { execFile, spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import http from "node:http";
+import nodeNet from "node:net";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,17 +48,53 @@ const exists = (f) => fs.stat(f).then((s) => s.isFile(), () => false);
 const pathExists = (p) => fs.stat(p).then(() => true, () => false);
 
 const AI_HOST = "127.0.0.1";
-const AI_PORT = 8765;
-const AI_HEALTH_URL = `http://${AI_HOST}:${AI_PORT}/health`;
+const AI_DEFAULT_PORT = 8765;
 const AI_MAX_LOGS = 30;
 const AI_POLL_INTERVAL_MS = 400;
-const AI_START_TIMEOUT_MS = 25000;
-const AI_REQUIRED_DEPS = ["fastapi", "uvicorn", "midigpt"];
+const AI_START_TIMEOUT_MS = 45000;
+const AI_REQUIRED_DEPS = ["fastapi", "uvicorn", "midigpt", "music21", "pydantic"];
 
 let aiChild = null;
 let aiStartPromise = null;
 let aiRecentLogs = [];
 let aiQuitting = false;
+let aiActivePort = AI_DEFAULT_PORT;
+
+function aiBaseUrl(port = aiActivePort) {
+  return `http://${AI_HOST}:${port}`;
+}
+
+function aiHealthUrl(port = aiActivePort) {
+  return `${aiBaseUrl(port)}/health`;
+}
+
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = nodeNet.createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, AI_HOST);
+  });
+}
+
+async function findAvailablePort(preferredPort = AI_DEFAULT_PORT) {
+  for (let p = preferredPort; p <= preferredPort + 20; p++) {
+    if (await isPortFree(p)) return p;
+  }
+  return new Promise((resolve, reject) => {
+    const server = nodeNet.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, AI_HOST, () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : preferredPort + 1;
+      server.close(() => resolve(port));
+    });
+  });
+}
 
 function aiServerRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, "ai-server") : root;
@@ -80,7 +117,7 @@ async function findStandaloneBinary(aiRoot) {
 
 function runExecFile(command, args, options = {}) {
   return new Promise((resolve) => {
-    execFile(command, args, { windowsHide: true, timeout: 8000, ...options }, (error, stdout, stderr) => {
+    execFile(command, args, { windowsHide: true, timeout: 20000, ...options }, (error, stdout, stderr) => {
       resolve({
         ok: !error,
         error: error ?? null,
@@ -92,24 +129,15 @@ function runExecFile(command, args, options = {}) {
 }
 
 async function inspectPythonCandidate(command, baseArgs) {
-  const quickCheck = await runExecFile(command, [...baseArgs, "-c", "import fastapi, uvicorn, midigpt"]);
-  if (quickCheck.ok) {
-    return {
-      status: "ok",
-      command,
-      baseArgs,
-      pythonPath: baseArgs.length ? `${command} ${baseArgs.join(" ")}` : command,
-    };
-  }
-  if (quickCheck.error?.code === "ENOENT") {
-    return { status: "not_found" };
-  }
-
+  const depsTuple = AI_REQUIRED_DEPS.map((d) => `'${d}'`).join(", ");
   const diagCode =
     "import importlib.util, json, sys; " +
-    "missing = [m for m in ('fastapi', 'uvicorn', 'midigpt') if importlib.util.find_spec(m) is None]; " +
+    `missing = [m for m in (${depsTuple}) if importlib.util.find_spec(m) is None]; ` +
     "print('__CHORDPLANNER_PY__:' + json.dumps({'exe': sys.executable, 'missing': missing}))";
-  const diag = await runExecFile(command, [...baseArgs, "-c", diagCode]);
+  const diag = await runExecFile(command, [...baseArgs, "-c", diagCode], { timeout: 10000 });
+  if (diag.error?.code === "ENOENT") {
+    return { status: "not_found" };
+  }
   const marker = "__CHORDPLANNER_PY__:";
   const line = diag.stdout
     .split(/\r?\n/)
@@ -120,18 +148,19 @@ async function inspectPythonCandidate(command, baseArgs) {
 
   try {
     const parsed = JSON.parse(line.slice(marker.length));
-    let missing = Array.isArray(parsed.missing) ? parsed.missing : [];
+    const missing = Array.isArray(parsed.missing) ? parsed.missing : [];
+    const pythonPath = parsed.exe || (baseArgs.length ? `${command} ${baseArgs.join(" ")}` : command);
     if (missing.length === 0) {
-      const verifiedMissing = [];
-      for (const dep of AI_REQUIRED_DEPS) {
-        const depCheck = await runExecFile(command, [...baseArgs, "-c", `import ${dep}`]);
-        if (!depCheck.ok) verifiedMissing.push(dep);
-      }
-      missing = verifiedMissing.length > 0 ? verifiedMissing : [...AI_REQUIRED_DEPS];
+      return {
+        status: "ok",
+        command: parsed.exe || command,
+        baseArgs: parsed.exe ? [] : baseArgs,
+        pythonPath,
+      };
     }
     return {
       status: "missing_deps",
-      pythonPath: parsed.exe || (baseArgs.length ? `${command} ${baseArgs.join(" ")}` : command),
+      pythonPath,
       missing,
     };
   } catch {
@@ -142,6 +171,17 @@ async function inspectPythonCandidate(command, baseArgs) {
 async function findPythonCandidates(aiRoot) {
   const candidates = [];
   const seenFiles = new Set();
+  const addFileCandidate = async (candidatePath) => {
+    if (!candidatePath) return;
+    const fullPath = path.resolve(candidatePath);
+    const key = process.platform === "win32" ? fullPath.toLowerCase() : fullPath;
+    if (seenFiles.has(key)) return;
+    if (await exists(fullPath)) {
+      seenFiles.add(key);
+      candidates.push({ command: fullPath, baseArgs: [] });
+    }
+  };
+
   const venvRoots = [
     path.join(aiRoot, ".venv_ai"),
     path.join(aiRoot, ".venv"),
@@ -155,11 +195,42 @@ async function findPythonCandidates(aiRoot) {
         ? [path.join("Scripts", "python.exe"), path.join("bin", "python.exe"), path.join("bin", "python")]
         : [path.join("bin", "python3"), path.join("bin", "python")];
     for (const rel of relPaths) {
-      const fullPath = path.resolve(path.join(venvDir, rel));
-      if (seenFiles.has(fullPath)) continue;
-      seenFiles.add(fullPath);
-      if (await exists(fullPath)) {
-        candidates.push({ command: fullPath, baseArgs: [] });
+      await addFileCandidate(path.join(venvDir, rel));
+    }
+  }
+
+  if (process.platform === "win32") {
+    const whereRes = await runExecFile("where.exe", ["python"], { timeout: 4000 });
+    if (whereRes.ok) {
+      for (const rawLine of whereRes.stdout.split(/\r?\n/)) {
+        const p = rawLine.trim();
+        if (p && !p.toLowerCase().includes("\\windowsapps\\")) {
+          await addFileCandidate(p);
+        }
+      }
+    }
+    const pyList = await runExecFile("py", ["-0p"], { timeout: 4000 });
+    if (pyList.ok) {
+      for (const rawLine of pyList.stdout.split(/\r?\n/)) {
+        const match = rawLine.match(/([A-Za-z]:\\[^\r\n]+?python\.exe)/i);
+        if (match) await addFileCandidate(match[1].trim());
+      }
+    }
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) {
+      const pyDir = path.join(localAppData, "Programs", "Python");
+      try {
+        const entries = await fs.readdir(pyDir, { withFileTypes: true });
+        const dirs = entries
+          .filter((e) => e.isDirectory() && /^Python3\d+/i.test(e.name))
+          .map((e) => e.name)
+          .sort()
+          .reverse();
+        for (const d of dirs) {
+          await addFileCandidate(path.join(pyDir, d, "python.exe"));
+        }
+      } catch {
+        // ignore if directory does not exist
       }
     }
   }
@@ -193,11 +264,31 @@ async function findPythonCandidates(aiRoot) {
   return { missingPython: true };
 }
 
-function probeAIHealth(timeoutMs = 1500) {
+function probeAIHealth(timeoutMs = 1500, port = aiActivePort) {
   return new Promise((resolve) => {
-    const req = http.get(AI_HEALTH_URL, (res) => {
-      res.resume();
-      resolve(res.statusCode === 200);
+    const req = http.get(aiHealthUrl(port), (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        resolve(false);
+        return;
+      }
+      let raw = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        if (raw.length < 32768) raw += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(raw);
+          const valid =
+            data &&
+            data.status === "ok" &&
+            (Array.isArray(data.available_models) || Array.isArray(data.models_installed));
+          resolve(Boolean(valid));
+        } catch {
+          resolve(false);
+        }
+      });
     });
     req.setTimeout(timeoutMs, () => {
       req.destroy();
@@ -226,14 +317,14 @@ function isAIChildAlive() {
 async function getAIServerStatus() {
   const starting = Boolean(aiStartPromise);
   const managed = isAIChildAlive();
-  const running = await probeAIHealth(1500);
+  const running = await probeAIHealth(1500, aiActivePort);
   let message = "Servidor IA parado.";
   if (running) {
     message = managed
-      ? `Servidor IA em execução em ${AI_HOST}:${AI_PORT}.`
-      : `Servidor IA já está em execução em ${AI_HOST}:${AI_PORT}.`;
+      ? `Servidor IA em execução em ${AI_HOST}:${aiActivePort}.`
+      : `Servidor IA já está em execução em ${AI_HOST}:${aiActivePort}.`;
   } else if (starting) {
-    message = `Servidor IA iniciando em ${AI_HOST}:${AI_PORT}...`;
+    message = `Servidor IA iniciando em ${AI_HOST}:${aiActivePort}...`;
   }
   return {
     ok: true,
@@ -241,6 +332,8 @@ async function getAIServerStatus() {
     starting,
     managed,
     pid: managed ? (aiChild?.pid ?? null) : null,
+    port: aiActivePort,
+    url: aiBaseUrl(aiActivePort),
     message,
     recentLogs: [...aiRecentLogs],
   };
@@ -293,17 +386,19 @@ async function stopAIServer() {
   if (child) {
     await killChildProcess(child);
   }
-  const running = await probeAIHealth(500);
+  const running = await probeAIHealth(500, aiActivePort);
   return {
     ok: true,
     running,
     starting: false,
     managed: false,
     pid: null,
+    port: aiActivePort,
+    url: aiBaseUrl(aiActivePort),
     message: child
       ? "Servidor IA encerrado."
       : running
-        ? `Servidor IA externo ativo em ${AI_HOST}:${AI_PORT}.`
+        ? `Servidor IA externo ativo em ${AI_HOST}:${aiActivePort}.`
         : "Servidor IA parado.",
     recentLogs: [...aiRecentLogs],
   };
@@ -313,7 +408,7 @@ async function startAIServer() {
   if (aiStartPromise) return aiStartPromise;
 
   aiStartPromise = (async () => {
-    const alreadyHealthy = await probeAIHealth(1500);
+    const alreadyHealthy = await probeAIHealth(1500, aiActivePort);
     if (alreadyHealthy) {
       const managed = isAIChildAlive();
       return {
@@ -322,7 +417,25 @@ async function startAIServer() {
         managed,
         starting: false,
         pid: managed ? (aiChild?.pid ?? null) : null,
-        message: "Servidor IA já está em execução em 127.0.0.1:8765.",
+        port: aiActivePort,
+        url: aiBaseUrl(aiActivePort),
+        message: `Servidor IA já está em execução em ${AI_HOST}:${aiActivePort}.`,
+        recentLogs: [...aiRecentLogs],
+      };
+    }
+
+    if (aiActivePort !== AI_DEFAULT_PORT && (await probeAIHealth(1500, AI_DEFAULT_PORT))) {
+      aiActivePort = AI_DEFAULT_PORT;
+      const managed = isAIChildAlive();
+      return {
+        ok: true,
+        running: true,
+        managed,
+        starting: false,
+        pid: managed ? (aiChild?.pid ?? null) : null,
+        port: aiActivePort,
+        url: aiBaseUrl(aiActivePort),
+        message: `Servidor IA já está em execução em ${AI_HOST}:${aiActivePort}.`,
         recentLogs: [...aiRecentLogs],
       };
     }
@@ -349,6 +462,8 @@ async function startAIServer() {
           starting: false,
           managed: false,
           pid: null,
+          port: aiActivePort,
+          url: aiBaseUrl(aiActivePort),
           missingPython: true,
           message: "Python 3 não encontrado. Instale Python 3.10+ e as dependências do servidor IA.",
           recentLogs: [...aiRecentLogs],
@@ -361,6 +476,8 @@ async function startAIServer() {
           starting: false,
           managed: false,
           pid: null,
+          port: aiActivePort,
+          url: aiBaseUrl(aiActivePort),
           missingDeps: true,
           pythonPath: py.pythonPath,
           missing: py.missing,
@@ -379,10 +496,15 @@ async function startAIServer() {
         starting: false,
         managed: false,
         pid: null,
+        port: aiActivePort,
+        url: aiBaseUrl(aiActivePort),
         message: "Aplicativo em encerramento.",
         recentLogs: [...aiRecentLogs],
       };
     }
+
+    const chosenPort = await findAvailablePort(AI_DEFAULT_PORT);
+    aiActivePort = chosenPort;
 
     aiRecentLogs = [];
     const prevPythonPath = process.env.PYTHONPATH;
@@ -392,7 +514,7 @@ async function startAIServer() {
       PYTHONPATH: pythonPathEnv,
       SKILL_PATH: skillPath,
       SERVER_HOST: AI_HOST,
-      SERVER_PORT: String(AI_PORT),
+      SERVER_PORT: String(chosenPort),
       PYTHONUTF8: "1",
     };
 
@@ -412,6 +534,8 @@ async function startAIServer() {
         starting: false,
         managed: false,
         pid: null,
+        port: chosenPort,
+        url: aiBaseUrl(chosenPort),
         message: "Aplicativo em encerramento.",
         recentLogs: [...aiRecentLogs],
       };
@@ -442,18 +566,22 @@ async function startAIServer() {
           starting: false,
           managed: false,
           pid: null,
+          port: chosenPort,
+          url: aiBaseUrl(chosenPort),
           message: `Servidor IA encerrou antes de ficar pronto (${exitDetail || "interrompido"}).`,
           recentLogs: [...aiRecentLogs],
         };
       }
-      if (await probeAIHealth(1000)) {
+      if (await probeAIHealth(1000, chosenPort)) {
         return {
           ok: true,
           running: true,
           starting: false,
           managed: true,
           pid: child.pid ?? null,
-          message: "Servidor IA iniciado em 127.0.0.1:8765.",
+          port: chosenPort,
+          url: aiBaseUrl(chosenPort),
+          message: `Servidor IA iniciado em ${AI_HOST}:${chosenPort}.`,
           recentLogs: [...aiRecentLogs],
         };
       }
@@ -468,6 +596,8 @@ async function startAIServer() {
         starting: false,
         managed: false,
         pid: null,
+        port: chosenPort,
+        url: aiBaseUrl(chosenPort),
         message: `Servidor IA encerrou antes de ficar pronto (${exitDetail || "interrompido"}).`,
         recentLogs: [...aiRecentLogs],
       };
@@ -480,7 +610,9 @@ async function startAIServer() {
       starting: false,
       managed: false,
       pid: null,
-      message: "Tempo limite (25s) ao iniciar o servidor IA em 127.0.0.1:8765.",
+      port: chosenPort,
+      url: aiBaseUrl(chosenPort),
+      message: `Tempo limite (${Math.round(AI_START_TIMEOUT_MS / 1000)}s) ao iniciar o servidor IA em ${AI_HOST}:${chosenPort}.`,
       recentLogs: [...aiRecentLogs],
     };
   })().finally(() => {
