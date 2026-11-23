@@ -1,19 +1,74 @@
-# ChordPlanner
+# ChordPlanner (v0.2.0)
 
-Planejador de progressões de acordes guiado por escala. Design completo em [`DESIGN.md`](DESIGN.md).
+Planejador de progressões de acordes guiado por escala com Roda Harmônica / Camelot, Linha do Tempo de 3 Camadas (Arranjo, Melodia e Acordes) e Módulo de Inteligência Artificial Neuro-Simbólica (`MIDI-GPT` + `music-composition` Skill).
 
-App só de frontend (Vite + React + TypeScript, Zustand, Tone.js). Sem backend: o estado fica no `localStorage` atrás da interface `SongRepository` (`src/state/repository.ts`), pronta para um backend futuro.
+Design original em [`DESIGN.md`](DESIGN.md) · Roadmap e especificações em [`ROADMAP.md`](ROADMAP.md) e [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md).
+
+---
+
+## 🚀 Novidades da Versão 0.2.0 (v4 + IA Musical)
+
+- **Camada de Melodia (Piano Roll compacto)**:
+  - Piano roll horizontal acoplado e sincronizado com a pista de acordes.
+  - Modo Estrito (dobrado nas notas da escala ativa) e Modo Colorido/Livre (cromático destacando a escala).
+  - Invariante monofônica estrita (edição por clique/arraste, preview sonoro e atalhos).
+  - Suporte à **Casa 2** da melodia (`melodyEnding`).
+  - Análise da relação nota↔acorde em tempo real (*chord-tone*, *tension*, *passing*, *nc*).
+- **Acordes Curtos e Respiro (`N.C.`)**:
+  - Grade harmônica até ¼ de tempo (semicolcheias em potências de 2).
+  - Inserção de pausas harmônicas explícitas (`N.C.` / *No Chord*), mantendo a pulsação do metrônomo e o *voice leading*.
+  - Auto-preenchimento inteligente de vãos sob a melodia com `N.C.`.
+- **Inteligência Harmônica**:
+  - Botão **✨ Auto-harmonizar** no Dock para derivar acordes automaticamente a partir da melodia nos tempos fortes.
+  - Destaque na Roda de Acordes dos candidatos com maior compatibilidade melódica.
+- **Módulo de IA Musical Neuro-Simbólico (`music_ai_module`)**:
+  - Combina o motor generativo **Metacreation/MIDI-GPT** (`midigpt` 0.4.2 com checkpoints locais `expressive_medium`, `prism_medium`, `yellow_medium` e `yellow_small`) com a base teórica da **Skill `music-composition`**.
+  - Modal **✨ IA Musical** acessível pelo cabeçalho, com Roda Camelot sincronizada (`1A..12A`, `1B..12B`), modos de geração (*Harmonizar Melodia*, *Gerar Melodia*, *Acompanhamento Completo*, *Inpainting de Compassos*) e aplicação atômica no bloco com **Desfazer/Refazer (`Ctrl+Z`)**.
+  - Servidor local FastAPI (`127.0.0.1:8765`) e interface de linha de comando (`cli.py`).
+- **Ajustes de Layout**:
+  - Opção **"Ajustar na área visível"** (checkbox no Dock) para redimensionar melodia e acordes sem necessidade de rolagem horizontal.
+  - **Arranjo horizontal dinâmico**: novos blocos dividem proporcionalmente a largura sem crescer verticalmente e barra de ações de bloco em linha única (`.block-actions-bar`).
+  - Checkbox **`Iniciar com o acorde selecionado`** com comportamento revisado para iniciar vazio por padrão.
+
+---
+
+## 🛠️ Instalação e Execução
+
+### Aplicação Web
 
 ```bash
 npm install
-npm run dev     # http://localhost:5173
-npm test        # Vitest (núcleo de teoria, store, fumaça da UI)
-npm run build
+npm run dev     # Servidor local em http://localhost:5173
+npm test        # Suíte de testes automatizados (Vitest, 526 testes)
+npm run lint    # Verificação de código (oxlint)
+npm run build   # Compilação para produção
 ```
 
-### App de desktop (macOS)
+### Módulo Python de IA Musical (`music_ai_module`)
 
-Versão standalone em Electron, com todos os samples embutidos: funciona sem internet desde a instalação.
+O módulo de IA opera de forma desacoplada e pode ser executado como serviço local ou via CLI:
+
+```bash
+# 1. Instalar dependências Python
+python -m pip install "midigpt==0.4.2" music21 fastapi uvicorn pydantic
+
+# 2. Iniciar o servidor HTTP local para o ChordPlanner
+python -m uvicorn music_ai_module.server:app --host 127.0.0.1 --port 8765
+
+# 3. Testes do módulo Python
+python -m pytest music_ai_module/tests/ -v
+
+# 4. Execução direta via CLI (lê JSON do stdin e devolve JSON no stdout)
+python -m music_ai_module.cli < music_ai_module/tests/fixtures/sample_request.json
+```
+
+*Nota:* Os pesos do modelo `Metacreation/MIDI-GPT` são resolvidos automaticamente do cache local em `~/.cache/huggingface/hub/models--Metacreation--MIDI-GPT` ou baixados sob demanda com autenticação Hugging Face (`huggingface-cli login`).
+
+---
+
+### App de Desktop (macOS)
+
+Versão standalone em Electron com todos os samples embutidos: funciona sem internet desde a instalação.
 
 ```bash
 npm run app:samples   # baixa os samples de todos os instrumentos para desktop-samples/ (uma vez; ~130 MB)
@@ -27,7 +82,9 @@ npm run app:dist      # gera release/ChordPlanner-<versão>-arm64.dmg
 - Testes manuais: `CHORDPLANNER_OFFLINE=1` simula o computador sem internet; `CHORDPLANNER_DEBUG=1` registra os pedidos de permissão. Ícone: `scripts/gen-mac-icon.py`.
 - Instalação das dependências: o binário do Electron vem do script de instalação do pacote. Se o npm bloquear scripts, rode `node node_modules/electron/install.js`.
 
-### App de desktop (Windows)
+---
+
+### App de Desktop (Windows)
 
 Sem Node.js instalado no sistema: `scripts/env.ps1` baixa um Node portátil para `.tools\node` (ignorado pelo git) e o põe no PATH da sessão.
 
@@ -41,12 +98,22 @@ npm run app:dist:win                    # gera release\ChordPlanner-Setup-<vers�
 - O instalador não é assinado: o Windows SmartScreen avisa na primeira execução ("Mais informações" → "Executar assim mesmo").
 - Sem `npm run app:samples` antes, os samples não vão embutidos: cada instrumento é baixado no primeiro uso e fica no cache do usuário.
 
-- `src/core/` — teoria musical pura e testada (escalas, acordes, diatônicos, modificadores, voicings, análise funcional, tempo, arranjo, braço de violão, prática).
-- Teclado MIDI (entrada): painel 🎛 MIDI → "Receber de um teclado MIDI". O acorde segurado aparece ao lado de "Roda de acordes" e acende na roda (`src/core/recognize.ts`); "Ouvir" toca as notas com o instrumento atual (pedal incluso); "Inserir na progressão" grava o acorde ao soltar as teclas. Chrome, Edge, Firefox e o app de desktop (o Safari não tem Web MIDI). A porta usada como saída (IAC Driver) é ignorada como entrada para não realimentar.
-- `src/audio/` — motor de áudio. `engine.ts` é uma fachada leve; Tone.js e smplr (`player.ts`, `loaders.ts`) só são baixados no primeiro som. Samples via smplr: SplendidGrandPiano, E-Pianos, VCSL, Smolken e MusyngKite (FluidR3 como plano B).
-- `src/state/` — store Zustand com desfazer/refazer e persistência.
-- `src/export/` — MIDI (`.mid`, com nomes dos acordes), MusicXML, ABC, ChordPro, cifra em texto, arquivo JSON reimportável (com validação de conteúdo externo) e link de compartilhamento (`#s=…`, música comprimida no fragmento da URL). Partituras usam `src/core/notation.ts` (compassos, ligaduras, armadura, grafia).
-- `src/ui/` — componentes (roda, progressão, arranjo, modificadores, seletores).
-- `src/sw/` e `src/pwa.ts` — service worker gerado no build (`vite.config.ts`) para uso offline; ícones gerados por `scripts/gen-icons.py`.
+---
 
-Roadmap atual: [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md) · Expansões futuras (pós-v4): [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).
+## 🎼 Estrutura do Código
+
+- `src/core/` — teoria musical pura e testada (escalas, acordes, diatônicos, modificadores, voicings, análise funcional, tempo, arranjo, braço de violão, prática, melodia monofônica, auto-harmonização e roda Camelot).
+- `src/ai/` — cliente de integração TypeScript com o módulo `music_ai_module`, serialização de blocos e conversão de notas/cifras geradas por IA.
+- `music_ai_module/` — módulo Python neuro-simbólico:
+  - `symbolic_engine/`: Skill Loader (`music-composition`), LLM & Planejador Teórico Determinístico, Primer Builder e Validador Harmônico.
+  - `generative_engine/`: Wrapper oficial do `midigpt`, mapeador de controles expressivos e gerenciador de modelos.
+  - `io_bridge/`: Conversores de formato e extrator harmônico de cifras.
+- `src/audio/` — motor de áudio. `engine.ts` é uma fachada leve; Tone.js e smplr (`player.ts`, `loaders.ts`) só são carregados sob demanda. Samples via smplr: SplendidGrandPiano, E-Pianos, VCSL, Smolken e MusyngKite (FluidR3 como plano B).
+- `src/state/` — store Zustand com desfazer/refazer atômico (`commit`), seleção e persistência em `localStorage`.
+- `src/export/` — MIDI (`.mid`, com trilha de melodia, acordes e nomes em lyrics), MusicXML (3 partes), ABC, ChordPro, cifra em texto, arquivo JSON e link de compartilhamento (`#s=…`).
+- `src/ui/` — componentes React (Roda Harmônica, Arranjo, Melodia, Progressão, Modificadores, Painel IA, Seletores).
+- `src/sw/` e `src/pwa.ts` — service worker gerado no build (`vite.config.ts`) para uso offline como PWA.
+
+---
+
+Roadmap de IA e arquitetura: [`ROADMAP.md`](ROADMAP.md) · Roadmap das etapas: [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md) · Expansões futuras: [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).

@@ -5,10 +5,21 @@
 
 ## Onde o projeto está
 
-- **MVP, v1, v2, v3 e v4 (Etapas 1 a 6): concluídos.**
+- **MVP, v1, v2, v3, v4 e Módulo Neuro-Simbólico IA (Etapas 1 a 6 + Módulo IA): concluídos.**
 - **Expansões futuras (pós-v4):** catalogadas em [`ROADMAP_FUTURO.md`](ROADMAP_FUTURO.md).
 - **Pendente fora do código:** licença do projeto e dos samples, publicação (Etapa 0) e as decisões em aberto do fim deste arquivo.
-- **Saúde:** typecheck, lint e build limpos; 489 testes passando (Etapa 6 concluída em 21/11/2026).
+- **Saúde:** typecheck, lint e build limpos; 526 testes passando no frontend (Vitest) e 48 testes passando no módulo de IA (pytest) (23/11/2026).
+
+### Entregue na v0.2.0 (23/11/2026)
+
+- **Módulo de IA Musical Neuro-Simbólica (`music_ai_module`)**:
+  - Integração com `Metacreation/MIDI-GPT` (checkpoints locais `expressive_medium`, `prism_medium`, `yellow_medium` e `yellow_small`) e com a base de conhecimento da Skill `music-composition`.
+  - Servidor local FastAPI (`127.0.0.1:8765`), CLI com entrada/saída JSON para pipelines e suíte completa com 48 testes pytest automatizados.
+  - Painel de IA Musical no ChordPlanner (`AIPanel`) sincronizado com a Roda Camelot (`1A..12A`, `1B..12B`), modos de geração (*Harmonizar Melodia*, *Gerar Melodia*, *Acompanhamento Completo*, *Inpainting de Compassos*), controles finos de performance humana (velocity, microtiming, densidade, polifonia, duração) e aplicação atômica com Undo/Redo (`Ctrl+Z`).
+- **Ajustes de Usabilidade e Layout**:
+  - Opção "Ajustar na área visível" (`timelineFit`) no Dock: ajusta melodia e acordes dinamicamente sem rolagem horizontal.
+  - Arranjo horizontal dinâmico: novos blocos dividem proporcionalmente o espaço sem crescimento vertical; barra de ações de bloco extraída para linha única (`.block-actions-bar`).
+  - Checkbox `Iniciar com o acorde selecionado` revisada para iniciar vazia por padrão.
 
 ### Entregue depois do roadmap (18/11/2026 – 21/11/2026)
 
