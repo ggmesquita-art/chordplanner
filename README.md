@@ -33,6 +33,9 @@ Design original em [`DESIGN.md`](DESIGN.md) · Roadmap e especificações em [`R
   - Opção **"Ajustar na área visível"** (checkbox no Dock) para redimensionar melodia e acordes sem necessidade de rolagem horizontal.
   - **Arranjo horizontal dinâmico**: novos blocos dividem proporcionalmente a largura sem crescer verticalmente e barra de ações de bloco em linha única (`.block-actions-bar`).
   - Checkbox **`Iniciar com o acorde selecionado`** com comportamento revisado para iniciar vazio por padrão.
+ 
+<img width="1512" height="982" alt="Captura de Tela 2026-11-23 às 21 04 50" src="https://github.com/user-attachments/assets/f017aca6-aa85-4fe7-ac7b-787b95d9f6e4" />
+
 
 ---
 
