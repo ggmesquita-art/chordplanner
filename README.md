@@ -2,6 +2,10 @@
 
 Planejador de progressões de acordes guiado por escala com Roda Harmônica / Camelot, Linha do Tempo de 3 Camadas (Arranjo, Melodia e Acordes) e Módulo de Inteligência Artificial Neuro-Simbólica (`MIDI-GPT` + `music-composition` Skill).
 
+
+<img width="1512" height="982" alt="Captura de Tela 2026-11-23 às 21 04 27" src="https://github.com/user-attachments/assets/ddc83188-cd05-4dcf-97e4-591ed054ac02" />
+
+
 Design original em [`DESIGN.md`](DESIGN.md) · Roadmap e especificações em [`ROADMAP.md`](ROADMAP.md) e [`ROADMAP_FINAL.md`](ROADMAP_FINAL.md).
 
 ---
